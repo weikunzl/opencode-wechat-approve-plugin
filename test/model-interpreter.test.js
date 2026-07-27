@@ -61,6 +61,27 @@ test("requires explicit persistent language before accepting always", () => {
   assert.equal(result.decision, "clarify")
 })
 
+test("never lets the model establish or escalate an approval decision", () => {
+  assert.equal(
+    validateModelIntent(
+      { requestIDs: ["r1"], decision: "once", confidence: 1, explanation: "" },
+      pending,
+      0.85,
+      "今天天气怎么样",
+    ).decision,
+    "clarify",
+  )
+  assert.equal(
+    validateModelIntent(
+      { requestIDs: ["r1"], decision: "always", confidence: 1, explanation: "" },
+      pending,
+      0.85,
+      "允许 npm test",
+    ).decision,
+    "clarify",
+  )
+})
+
 test("clarifies low-confidence malformed or conflicting model output", () => {
   assert.equal(
     validateModelIntent(

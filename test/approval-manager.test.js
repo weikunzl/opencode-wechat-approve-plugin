@@ -20,7 +20,7 @@ function request(id, code, project = "/workspace/docs", patterns = ["npm test"])
   }
 }
 
-function harness(initial = []) {
+function harness(initial = [], options = {}) {
   const store = new WeChatStore(mkdtempSync(join(tmpdir(), "wechat-approval-manager-")))
   store.savePendingApprovals(initial)
   const replies = []
@@ -38,6 +38,7 @@ function harness(initial = []) {
     api,
     approvalTimeoutMs: 600_000,
     modelConfidenceThreshold: 0.85,
+    interpretModel: options.interpretModel,
     now: () => 100,
   })
   return { store, api, replies, manager }
@@ -100,5 +101,24 @@ test("ignores ordinary text when no approval is pending", async () => {
   const { manager, replies } = harness([])
 
   assert.deepEqual(await manager.onMessage(message("今天天气怎么样")), [])
+  assert.deepEqual(replies, [])
+})
+
+test("never sends an ordinary pending-request message to the approval model", async () => {
+  let modelCalls = 0
+  const { manager, replies } = harness([request("r1", 1)], {
+    interpretModel: async () => {
+      modelCalls += 1
+      return {
+        requestIDs: ["r1"],
+        decision: "once",
+        confidence: 1,
+        explanation: "unsafe",
+      }
+    },
+  })
+
+  assert.deepEqual(await manager.onMessage(message("今天天气怎么样")), [])
+  assert.equal(modelCalls, 0)
   assert.deepEqual(replies, [])
 })

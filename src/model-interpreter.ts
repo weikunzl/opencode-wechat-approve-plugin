@@ -1,4 +1,5 @@
 import type { PendingApproval } from "./domain.js"
+import { parseApprovalDecision } from "./approval-intent.js"
 
 export interface ApprovalIntent {
   requestIDs: string[]
@@ -42,8 +43,9 @@ export function validateModelIntent(
     return clarify("模型输出未通过安全校验")
   }
 
-  if (decision === "always" && !hasPersistentScope(sourceText)) {
-    return clarify("用户没有明确表达始终允许")
+  const localDecision = parseApprovalDecision(sourceText)
+  if (!localDecision || decision !== localDecision) {
+    return clarify("模型不能建立或改变用户的授权决定")
   }
 
   return {
@@ -84,11 +86,6 @@ function buildPrompt(text: string, pending: PendingApproval[]): string {
     `待审批请求: ${JSON.stringify(safePending)}`,
     `用户回复: ${JSON.stringify(text.slice(0, 500))}`,
   ].join("\n")
-}
-
-function hasPersistentScope(text: string): boolean {
-  const normalized = text.normalize("NFKC").toLowerCase()
-  return /always|allow\s*all|始终|永久|以后都|全部授权/.test(normalized)
 }
 
 function clarify(explanation: string): ApprovalIntent {

@@ -144,9 +144,22 @@ export class ApprovalManager {
       ]
     }
 
+    const localDecision = parseApprovalDecision(message.text) ?? conversation?.decision ?? null
     let intent = interpretDeterministic(message.text, pending, conversation)
-    if (!intent && this.interpretModel) {
-      intent = await this.interpretModel(message.text, pending, this.modelConfidenceThreshold)
+    if (
+      localDecision &&
+      this.interpretModel &&
+      hasSelectionDescription(message.text) &&
+      (!intent || intent.decision === "clarify")
+    ) {
+      const selected = await this.interpretModel(
+        message.text,
+        pending,
+        this.modelConfidenceThreshold,
+      )
+      if (selected.decision !== "clarify") {
+        intent = { ...selected, decision: localDecision }
+      }
     }
     if (!intent) return []
 
@@ -285,4 +298,16 @@ function label(decision: "once" | "always" | "reject"): string {
 
 function firstLine(error: unknown): string {
   return (error instanceof Error ? error.message : String(error)).split(/\r?\n/, 1)[0]
+}
+
+function hasSelectionDescription(text: string): boolean {
+  const remainder = text
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(
+      /allow\s*all|always|deny|reject|approve|allow|okay|yes|始终允许|永久允许|以后都允许|全部授权|好的|好啊|可以|是的|确认|同意|允许|通过|拒绝|不同意|不允许|不可以|不通过|不确认|不要|别执行|取消/g,
+      "",
+    )
+    .replace(/[\s,.，。!！?？;；:#]/g, "")
+  return remainder.length >= 2
 }
