@@ -16,6 +16,10 @@
 - Clear approval phrases use deterministic rules; a model may only return validated structured intent.
 - Ambiguous input never grants permission.
 - General WeChat chat-to-OpenCode forwarding and AI-facing WeChat tools are removed.
+- Product code and CLI support Windows, macOS, and Linux through TypeScript/Node.js.
+- Do not use AppleScript, Accessibility, Bash, `flock`, Unix sockets, or
+  POSIX-only process control in shipped code. macOS desktop automation is only
+  an acceptance-test driver.
 - Every production behavior is implemented with a red-green test cycle.
 
 ---
@@ -562,17 +566,16 @@ Expected: FAIL because no installer CLI exists.
 
 Support JSON and JSONC through a parser that preserves unrelated fields and
 comments. Detect duplicate plugin installation and a second independent runtime
-lease. Never overwrite a non-loopback hostname without explicit confirmation.
+lease. Implement the lease with exclusive file creation and PID/heartbeat
+validation, not `flock`. Never overwrite a non-loopback hostname without
+explicit confirmation. Use `os.homedir()`, `path` APIs, argument-array process
+spawns with `shell: false`, and platform-neutral temporary directories.
 
 - [ ] **Step 4: Run installer tests and a temporary-home smoke test**
 
-Run:
-
-```bash
-npm test
-temporary_home="$(mktemp -d)"
-HOME="$temporary_home" node dist/bin.js doctor
-```
+Run `npm test`, then invoke `node dist/bin.js doctor` from a Node-created
+temporary profile directory so the smoke test is identical on Windows, macOS,
+and Linux.
 
 Expected: automated tests pass; doctor reports unbound/model/server checks
 without creating files outside the temporary home.
@@ -654,7 +657,8 @@ git diff --check
 ```
 
 Expected: clean dependency install, zero test failures, successful TypeScript
-build, and no whitespace errors.
+build, and no whitespace errors. CI repeats the suite on current Windows,
+macOS, and Linux runners.
 
 - [ ] **Step 5: Deploy the built plugin to the current global OpenCode setup**
 

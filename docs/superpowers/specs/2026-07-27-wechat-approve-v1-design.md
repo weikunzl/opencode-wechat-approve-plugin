@@ -15,6 +15,12 @@ is pending.
 
 V1 uses one central OpenCode server on `127.0.0.1:4096`.
 
+The shipped implementation is cross-platform TypeScript/Node.js and supports
+Windows, macOS, and Linux. Product code must not depend on AppleScript,
+Accessibility APIs, `launchd`, Unix sockets, `flock`, Bash, or POSIX-only
+process signals. macOS Accessibility is used only by the real acceptance
+driver on the developer machine and is not part of the plugin or installer.
+
 ```text
 opencode web / serve :4096
 ├── sessions for project A
@@ -164,8 +170,10 @@ All state lives under:
 ```
 
 Writes use a temporary file, `fsync`, atomic rename, and restrictive
-permissions. Corrupt files are quarantined with a timestamp instead of being
-silently overwritten.
+permissions where the operating system supports POSIX modes. Windows relies on
+the current user's profile ACLs; a doctor check warns when the state directory
+is accessible to other principals. Corrupt files are quarantined with a
+timestamp instead of being silently overwritten.
 
 ## 5. Approval Conversation
 
@@ -255,6 +263,8 @@ No model call is made and no session is created.
 - Only one long-poll loop may run in the supported central-server topology.
 - A second independent plugin instance detects the active runtime lease and
   disables inbound processing with a visible local warning.
+- Runtime leasing uses an exclusive state file plus PID/heartbeat validation,
+  not `flock`, so the same algorithm works on Windows, macOS, and Linux.
 - Restart resumes the cursor, outbox, session run states, and pending approval
   reconciliation.
 - Secrets and context tokens are redacted from logs.
@@ -264,6 +274,8 @@ No model call is made and no session is created.
 - Listen only on loopback by default.
 - Recommend an `OPENCODE_SERVER_PASSWORD`; never persist it in plugin logs.
 - Store bot credentials and context tokens with mode `0600`.
+- On Windows, store state under the user's profile and verify effective ACL
+  isolation instead of claiming POSIX `0600` semantics.
 - Never include environment variables, full file contents, or secrets in
   WeChat notifications.
 - Limit approval previews to permission type, sanitized patterns, project,
@@ -298,6 +310,11 @@ Use fake OpenCode and fake iLink HTTP servers to verify:
 - transport retry, authentication failure, and outbox replay;
 - unauthorized sender and group-message rejection;
 - ordinary messages never reach OpenCode.
+
+Run the automated suite on current Windows, macOS, and Linux runners. Path
+handling uses `node:path`/`node:os`; child processes use argument arrays with
+`shell: false`; tests must not assume `/tmp`, `$HOME`, slash separators, or
+POSIX exit signals.
 
 ### Real end-to-end acceptance
 
