@@ -114,25 +114,24 @@ export class SessionNotifier {
       phase: "completed",
       updatedAt: this.now(),
     }
+    const notification: NotificationEnvelope = {
+      id: `session:${sessionID}:run:${completed.run}:done`,
+      kind: "done",
+      text: formatStatusMessage(
+        "done",
+        [
+          `[Done] ${metadata.title}`,
+          `Session: ${sessionID}`,
+          `Project: ${metadata.directory}`,
+          `Completed: ${new Date(completed.updatedAt).toISOString()}`,
+        ].join("\n"),
+      ),
+      createdAt: completed.updatedAt,
+    }
+    this.store.enqueueNotification(notification)
     this.states.set(sessionID, completed)
     this.persist()
-
-    return [
-      {
-        id: `session:${sessionID}:run:${completed.run}:done`,
-        kind: "done",
-        text: formatStatusMessage(
-          "done",
-          [
-            `[Done] ${metadata.title}`,
-            `Session: ${sessionID}`,
-            `Project: ${metadata.directory}`,
-            `Completed: ${new Date(completed.updatedAt).toISOString()}`,
-          ].join("\n"),
-        ),
-        createdAt: completed.updatedAt,
-      },
-    ]
+    return [notification]
   }
 
   private async markError(sessionID: string, error: unknown): Promise<NotificationEnvelope[]> {
@@ -151,29 +150,28 @@ export class SessionNotifier {
       run: Math.max(1, current?.run ?? 0),
       updatedAt: this.now(),
     }
-    this.states.set(sessionID, failed)
-    this.persist()
-
     const kind = cancelled ? "cancelled" : "error"
     const label = cancelled ? "Cancelled" : "Error"
     const details = cancelled ? "Task cancelled by user or client." : formatError(error)
 
-    return [
-      {
-        id: `session:${sessionID}:run:${failed.run}:${kind}`,
+    const notification: NotificationEnvelope = {
+      id: `session:${sessionID}:run:${failed.run}:${kind}`,
+      kind,
+      text: formatStatusMessage(
         kind,
-        text: formatStatusMessage(
-          kind,
-          [
-            `[${label}] ${metadata.title}`,
-            `Session: ${sessionID}`,
-            `Project: ${metadata.directory}`,
-            details,
-          ].join("\n"),
-        ),
-        createdAt: failed.updatedAt,
-      },
-    ]
+        [
+          `[${label}] ${metadata.title}`,
+          `Session: ${sessionID}`,
+          `Project: ${metadata.directory}`,
+          details,
+        ].join("\n"),
+      ),
+      createdAt: failed.updatedAt,
+    }
+    this.store.enqueueNotification(notification)
+    this.states.set(sessionID, failed)
+    this.persist()
+    return [notification]
   }
 
   private async safeMetadata(sessionID: string): Promise<SessionMetadata> {

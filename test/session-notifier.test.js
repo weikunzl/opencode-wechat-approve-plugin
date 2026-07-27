@@ -31,7 +31,7 @@ const error = (sessionID, value) => ({
 })
 
 test("notifies exactly once for a busy to idle transition", async () => {
-  const { notifier } = harness()
+  const { notifier, store } = harness()
 
   await notifier.handle(status("ses_1", "busy"))
   const first = await notifier.handle(idle("ses_1"))
@@ -42,6 +42,7 @@ test("notifies exactly once for a busy to idle transition", async () => {
   assert.match(first[0].text, /插件实现/)
   assert.match(first[0].text, /ses_1/)
   assert.match(first[0].text, /\/workspace\/docs/)
+  assert.deepEqual(store.loadOutbox().map((item) => item.id), [first[0].id])
 })
 
 test("failure suppresses the following idle success and deduplicates errors", async () => {

@@ -62,6 +62,22 @@ test("routes once always and reject by OpenCode request ID", async () => {
   ])
 })
 
+test("queues a new approval notification before returning it", async () => {
+  const { manager, store } = harness([])
+  const notices = await manager.onPermissionAsked({
+    type: "permission.asked",
+    properties: {
+      id: "r-new",
+      sessionID: "ses-new",
+      permission: "bash",
+      patterns: ["npm test"],
+      metadata: { directory: "/workspace/docs" },
+    },
+  })
+
+  assert.deepEqual(store.loadOutbox().map((item) => item.id), [notices[0].id])
+})
+
 test("asks a follow-up and applies the inherited decision to the selected request", async () => {
   const { manager, replies, store } = harness([request("r1", 1), request("r2", 2)])
 

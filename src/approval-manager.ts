@@ -90,10 +90,7 @@ export class ApprovalManager {
       createdAt: now,
       expiresAt: now + this.approvalTimeoutMs,
     }
-    this.store.savePendingApprovals([...existing, approval])
-
-    return [
-      this.notice(
+    const notification = this.notice(
         `approval:${approval.requestID}`,
         "approval",
         "approval",
@@ -106,8 +103,9 @@ export class ApprovalManager {
         ]
           .filter(Boolean)
           .join("\n"),
-      ),
-    ]
+      )
+    this.store.savePendingApprovals([...existing, approval])
+    return [notification]
   }
 
   async onPermissionReplied(event: PermissionRepliedEvent): Promise<void> {
@@ -260,12 +258,14 @@ export class ApprovalManager {
     status: string,
     text: string,
   ): NotificationEnvelope {
-    return {
+    const notification: NotificationEnvelope = {
       id,
       kind,
       text: formatStatusMessage(status, text),
       createdAt: this.now(),
     }
+    this.store.enqueueNotification(notification)
+    return notification
   }
 }
 
