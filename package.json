@@ -26,7 +26,8 @@
     "prepare": "npm run build",
     "dev": "tsc --watch",
     "test": "npm run build && node --test test/run-tests.js",
-    "coverage": "npm run build && c8 --reporter=text --reporter=lcov node --test test/run-tests.js"
+    "coverage": "npm run build && c8 --reporter=text --reporter=lcov node --test test/run-tests.js",
+    "test:e2e": "node scripts/e2e-smoke.js"
   },
   "dependencies": {
     "cross-spawn": "^7.0.6",
