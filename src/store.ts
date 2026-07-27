@@ -308,7 +308,8 @@ function isApprovalConversation(value: unknown): value is ApprovalConversation {
     Array.isArray(value.requestIDs) &&
     value.requestIDs.every((id) => typeof id === "string") &&
     ["once", "always", "reject"].includes(String(value.decision)) &&
-    typeof value.createdAt === "number"
+    typeof value.createdAt === "number" &&
+    (value.selectionOnly === undefined || typeof value.selectionOnly === "boolean")
   )
 }
 

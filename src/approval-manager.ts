@@ -147,7 +147,9 @@ export class ApprovalManager {
       ]
     }
 
-    const localDecision = parseApprovalDecision(message.text) ?? conversation?.decision ?? null
+    const localDecision =
+      parseApprovalDecision(message.text) ??
+      (conversation?.selectionOnly ? null : conversation?.decision ?? null)
     let intent = interpretDeterministic(message.text, pending, conversation)
     if (this.interpretModel && (!intent || intent.decision === "clarify")) {
       const selected = await this.interpretModel(
@@ -167,10 +169,19 @@ export class ApprovalManager {
         }
       }
     }
-    if (!intent) return []
+    if (!intent) {
+      intent = {
+        requestIDs: [],
+        decision: "clarify",
+        confidence: 0,
+        explanation: "无法识别授权目标或决定",
+      }
+    }
 
     if (intent.decision === "clarify") {
-      const decision = parseApprovalDecision(message.text) ?? conversation?.decision
+      const decision =
+        parseApprovalDecision(message.text) ??
+        (conversation?.selectionOnly ? null : conversation?.decision)
       if (!decision) {
         return [
           this.notice(
@@ -183,7 +194,7 @@ export class ApprovalManager {
       }
       this.store.saveConversation({
         version: currentVersion,
-        requestIDs: pending.map((item) => item.requestID),
+        requestIDs: orderPending(pending).map((item) => item.requestID),
         decision,
         createdAt: this.now(),
       })
@@ -233,7 +244,19 @@ export class ApprovalManager {
     const remaining = await this.api.list()
     if (!isActive()) return []
     this.store.savePendingApprovals(remaining)
-    this.store.saveConversation(null)
+    if (remaining.length > 0) {
+      this.store.saveConversation({
+        version: versionOf(remaining),
+        requestIDs: orderPending(latest).map((item) => item.requestID),
+        // The follow-up must explicitly choose its decision; never inherit
+        // the decision used for the previous partial selection.
+        decision: "once",
+        selectionOnly: true,
+        createdAt: this.now(),
+      })
+    } else {
+      this.store.saveConversation(null)
+    }
     const notices = [
       this.notice(
         `approval-result:${message.messageID}`,
@@ -242,7 +265,7 @@ export class ApprovalManager {
         `[Approval result]\n${results.join("\n")}`,
       ),
     ]
-    if (remaining.length > 0 && intent.requestIDs.length < latest.length) {
+    if (remaining.length > 0) {
       notices.push(
         this.notice(
           `approval-follow-up:${message.messageID}`,
@@ -312,6 +335,15 @@ function versionOf(pending: PendingApproval[]): string {
     .map((item) => item.requestID)
     .sort()
     .join(",")
+}
+
+function orderPending(pending: PendingApproval[]): PendingApproval[] {
+  return [...pending].sort(
+    (left, right) =>
+      left.createdAt - right.createdAt ||
+      left.code - right.code ||
+      left.requestID.localeCompare(right.requestID),
+  )
 }
 
 function formatPending(pending: PendingApproval[]): string {

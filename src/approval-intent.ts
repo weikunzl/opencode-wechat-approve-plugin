@@ -22,14 +22,17 @@ export function interpretDeterministic(
   const normalized = normalize(text)
   const explicitDecision = parseApprovalDecision(text)
   const inheritedDecision =
-    explicitDecision === null && conversation && isStrictSelectionReply(text)
+    explicitDecision === null &&
+    conversation &&
+    !conversation.selectionOnly &&
+    isStrictSelectionReply(text)
       ? conversation.decision
       : null
   const decision = explicitDecision ?? inheritedDecision
   if (!decision) return null
   if (pending.length === 0) return clarify("没有待审批请求")
 
-  const assignments = parseAssignments(text, pending)
+  const assignments = parseAssignments(text, pending, conversation)
   if (assignments) return resolvedAssignments(assignments)
 
   if (pending.length === 1) {
@@ -81,8 +84,11 @@ function selectRequests(
   }
   if (byCode.size > 0) return pending.filter((item) => byCode.has(item.requestID)).map((item) => item.requestID)
 
-  if (/(?:全部|所有|全都|两个都|三个都|都允许|都拒绝|都始终)/.test(text)) {
-    return orderedPending(pending).map((item) => item.requestID)
+  if (
+    /(?:全部|所有|全都|两个都|三个都|都允许|都拒绝|都始终)/.test(text) ||
+    /(?:allow|approve)\s+all|all\s+(?:allow|approve|reject|deny)/.test(text)
+  ) {
+    return orderedForConversation(pending, conversation).map((item) => item.requestID)
   }
 
   const ordinal = ordinalIndex(text)
@@ -146,13 +152,14 @@ function resolved(requestIDs: string[], decision: "once" | "always" | "reject"):
 function parseAssignments(
   text: string,
   pending: PendingApproval[],
+  conversation: ApprovalConversation | null = null,
 ): Array<{ requestID: string; decision: "once" | "always" | "reject" }> | null {
   const clauses = splitAssignmentClauses(text)
   if (clauses.length === 0 || clauses.some((clause) => !ASSIGNMENT_SELECTOR.test(clause))) {
     return null
   }
 
-  const ordered = orderedPending(pending)
+  const ordered = orderedForConversation(pending, conversation)
   const assignments: Array<{ requestID: string; decision: "once" | "always" | "reject"; order: number }> = []
   for (const clause of clauses) {
     if ((clause.match(/第(?:[一二三四五六七八九十百]+|\d+)个|#?\d+/g) ?? []).length !== 1) return null
@@ -162,10 +169,14 @@ function parseAssignments(
 
     const target =
       selector.kind === "ordinal"
-        ? ordered[selector.index]
+        ? conversation?.requestIDs[selector.index]
+          ? pending.find((item) => item.requestID === conversation.requestIDs[selector.index])
+          : ordered[selector.index]
         : pending.find((item) => item.code === selector.code)
     if (!target) return null
-    const order = ordered.findIndex((item) => item.requestID === target.requestID)
+    const order = conversation
+      ? conversation.requestIDs.indexOf(target.requestID)
+      : ordered.findIndex((item) => item.requestID === target.requestID)
     if (assignments.some((item) => item.requestID === target.requestID)) return null
     assignments.push({ requestID: target.requestID, decision, order })
   }
@@ -204,6 +215,22 @@ function orderedPending(pending: PendingApproval[]): PendingApproval[] {
   return [...pending].sort(
     (left, right) => left.createdAt - right.createdAt || left.code - right.code || left.requestID.localeCompare(right.requestID),
   )
+}
+
+function orderedForConversation(
+  pending: PendingApproval[],
+  conversation: ApprovalConversation | null,
+): PendingApproval[] {
+  if (!conversation?.requestIDs.length) return orderedPending(pending)
+  const byID = new Map(pending.map((item) => [item.requestID, item]))
+  const ordered: PendingApproval[] = []
+  for (const requestID of conversation.requestIDs) {
+    const item = byID.get(requestID)
+    if (item) ordered.push(item)
+  }
+  const known = new Set(ordered.map((item) => item.requestID))
+  ordered.push(...orderedPending(pending).filter((item) => !known.has(item.requestID)))
+  return ordered
 }
 
 function chineseNumber(value: string): number {

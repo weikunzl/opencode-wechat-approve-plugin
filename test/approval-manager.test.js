@@ -67,7 +67,11 @@ test("applies all-request decisions for Chinese and English all forms", async ()
     ["全部允许", "once"],
     ["全部始终允许", "always"],
     ["全部always", "always"],
+    ["全部 always", "always"],
     ["全部拒绝", "reject"],
+    ["全部 deny", "reject"],
+    ["全部 reject", "reject"],
+    ["all allow", "once"],
   ]) {
     const { manager, replies } = harness([request("r1", 1), request("r2", 2)])
 
@@ -78,6 +82,77 @@ test("applies all-request decisions for Chinese and English all forms", async ()
       ["r2", decision],
     ], text)
   }
+})
+
+test("preserves the original ordinal snapshot across multiple partial replies", async () => {
+  const { manager, replies, store } = harness([
+    request("r3", 3, "/workspace/third", ["third"], 300),
+    request("r1", 1, "/workspace/first", ["first"], 100),
+    request("r2", 2, "/workspace/second", ["second"], 200),
+  ])
+
+  const first = await manager.onMessage(message("第一个允许"))
+  assert.deepEqual(replies, [["r1", "once"]])
+  assert.match(first.map((item) => item.text).join("\n"), /还有 2 个待审批请求/)
+  assert.deepEqual(store.loadConversation().requestIDs, ["r1", "r2", "r3"])
+  assert.equal(store.loadConversation().selectionOnly, true)
+
+  await manager.onMessage(message("第二个拒绝"))
+
+  assert.deepEqual(replies, [
+    ["r1", "once"],
+    ["r2", "reject"],
+  ])
+  assert.deepEqual(store.loadPendingApprovals().map((item) => item.requestID), ["r3"])
+  assert.equal(store.loadConversation().selectionOnly, true)
+})
+
+test("does not inherit a previous partial decision for a bare ordinal", async () => {
+  let modelCalls = 0
+  const { manager, replies } = harness([request("r1", 1), request("r2", 2)], {
+    interpretModel: async () => {
+      modelCalls += 1
+      return { requestIDs: [], decision: "clarify", confidence: 0, explanation: "unclear" }
+    },
+  })
+
+  await manager.onMessage(message("第一个允许"))
+  const notices = await manager.onMessage(message("第二个"))
+
+  assert.equal(modelCalls, 1)
+  assert.deepEqual(replies, [["r1", "once"]])
+  assert.match(notices.map((item) => item.text).join("\n"), /Approval unclear/)
+})
+
+test("a duplicate reply after the queue is empty is ignored", async () => {
+  const { manager, replies } = harness([request("r1", 1)])
+
+  await manager.onMessage(message("允许"))
+  await manager.onMessage(message("允许"))
+
+  assert.deepEqual(replies, [["r1", "once"]])
+})
+
+test("a once batch does not authorize a later request", async () => {
+  const { manager, replies, api } = harness([request("r1", 1), request("r2", 2)])
+
+  await manager.onMessage(message("全部允许"))
+  api.pending = [request("r3", 3)]
+  const notices = await manager.onPermissionAsked({
+    type: "permission.asked",
+    properties: {
+      id: "r3",
+      sessionID: "ses_3",
+      permission: "bash",
+      patterns: ["new command"],
+      metadata: { directory: "/workspace/docs" },
+    },
+  })
+
+  assert.deepEqual(replies, [["r1", "once"], ["r2", "once"]])
+  assert.match(notices[0].text, /Approval #1/)
+  assert.deepEqual((await manager.onMessage(message("拒绝"))).map((item) => item.kind), ["approval-result"])
+  assert.deepEqual(replies, [["r1", "once"], ["r2", "once"], ["r3", "reject"]])
 })
 
 test("applies mixed ordinal decisions in created-at order", async () => {

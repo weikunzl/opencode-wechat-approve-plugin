@@ -39,4 +39,9 @@ export interface ApprovalConversation {
   requestIDs: string[]
   decision: "once" | "always" | "reject"
   createdAt: number
+  /**
+   * A partial selection keeps the original request order for subsequent
+   * ordinal replies, but must not inherit the previous decision.
+   */
+  selectionOnly?: boolean
 }

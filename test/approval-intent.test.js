@@ -91,6 +91,52 @@ test("parses mixed ordinal decisions in timestamp order", () => {
   })
 })
 
+test("keeps a stable code/request ID tie-breaker for equal timestamps", () => {
+  const pending = [
+    { ...approval("z-request", 8), createdAt: 100 },
+    { ...approval("a-request", 7), createdAt: 100 },
+    { ...approval("m-request", 9), createdAt: 100 },
+  ]
+
+  assert.deepEqual(
+    interpretDeterministic("第一个允许、第二个拒绝、第三个始终允许", pending),
+    {
+      requestIDs: ["a-request", "z-request", "m-request"],
+      decision: "once",
+      decisions: {
+        "a-request": "once",
+        "z-request": "reject",
+        "m-request": "always",
+      },
+      confidence: 1,
+      explanation: "deterministic",
+    },
+  )
+})
+
+test("retains original ordinal order during a partial follow-up", () => {
+  const pending = [
+    { ...approval("r3", 3), createdAt: 300 },
+    { ...approval("r1", 1), createdAt: 100 },
+    { ...approval("r2", 2), createdAt: 200 },
+  ]
+  const conversation = {
+    version: "r1,r2,r3",
+    requestIDs: ["r1", "r2", "r3"],
+    decision: "once",
+    selectionOnly: true,
+    createdAt: 1,
+  }
+
+  assert.deepEqual(interpretDeterministic("第二个拒绝", [pending[0], pending[2]], conversation), {
+    requestIDs: ["r2"],
+    decision: "reject",
+    confidence: 1,
+    explanation: "deterministic",
+  })
+  assert.equal(interpretDeterministic("第二个", [pending[0], pending[2]], conversation), null)
+})
+
 test("returns null for ordinary text that is not an approval reply", () => {
   assert.equal(interpretDeterministic("今天天气怎么样", [approval("r1", 1)]), null)
 })
