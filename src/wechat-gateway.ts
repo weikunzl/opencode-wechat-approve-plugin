@@ -97,8 +97,10 @@ export class WeChatGateway {
     binding = false,
     signal?: AbortSignal,
   ): Promise<void> {
+    const generation = bindingGeneration(this.store)
     const response = await this.transport.poll(this.store.loadCursor(), signal)
     if (signal?.aborted) return
+    if (generation !== bindingGeneration(this.store)) return
     if (response.ret !== undefined && response.ret !== 0) {
       throw new Error(`微信轮询失败: ${response.errmsg || response.ret}`)
     }
@@ -181,6 +183,19 @@ export class WeChatGateway {
       }
     }
   }
+}
+
+function bindingGeneration(store: WeChatStore): string {
+  const account = store.loadAccount()
+  const context = store.loadContext()
+  return JSON.stringify([
+    account?.accountId ?? null,
+    account?.token ?? null,
+    account?.baseUrl ?? null,
+    context?.boundUserID ?? null,
+    context?.contextToken ?? null,
+    context?.updatedAt ?? null,
+  ])
 }
 
 function parseInbound(

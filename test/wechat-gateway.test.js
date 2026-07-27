@@ -202,6 +202,39 @@ test("stop waits for an in-flight poll and never dispatches its response", async
   assert.notEqual(store.loadCursor(), "stale-cursor")
 })
 
+test("discards an old-account poll response after a binding change", async () => {
+  const { store } = harness()
+  const gateway = new WeChatGateway(store, {
+    login: async () => {
+      throw new Error("not expected")
+    },
+    poll: async () => {
+      store.commitBinding(
+        {
+          accountId: "new-bot",
+          token: "new-secret",
+          baseUrl: "https://new.example.invalid",
+          userId: "owner@im.wechat",
+          savedAt: "2026-07-27T00:00:00.000Z",
+        },
+        {
+          boundUserID: "owner@im.wechat",
+          contextToken: "new-context",
+          updatedAt: 2,
+        },
+        "new-bind-cursor",
+      )
+      return { ret: 0, msgs: [], get_updates_buf: "old-poll-cursor" }
+    },
+    sendText: async () => {},
+  })
+
+  await gateway.pollOnce(async () => {})
+
+  assert.equal(store.loadCursor(), "new-bind-cursor")
+  assert.equal(store.loadAccount().accountId, "new-bot")
+})
+
 test("redacts credentials and bounds every outbound WeChat notification", async () => {
   const { gateway, sent } = harness()
 
