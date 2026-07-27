@@ -6,6 +6,7 @@ import type { ApprovalConversation, NotificationEnvelope, PendingApproval, Sessi
 import type { AccountData } from "./types.js"
 
 export const WECHAT_DATA_DIR_NAME = "wechat-approve"
+export const CONTEXT_INVALIDATION_FILE_NAME = "context-invalid.json"
 
 interface StoredBinding {
   account: AccountData
@@ -53,6 +54,7 @@ export class WeChatStore {
   }
 
   loadContext(): WeChatContext | null {
+    if (this.contextIsInvalidated()) return null
     const binding = this.loadBinding()
     if (binding) return binding.context
     const current = this.readJSON<WeChatContext | null>("context-v1.json", null, isWeChatContext)
@@ -67,10 +69,12 @@ export class WeChatStore {
     const binding = this.loadBinding()
     if (binding) {
       this.atomicWrite("binding-v1.json", { ...binding, context })
+      this.remove(CONTEXT_INVALIDATION_FILE_NAME)
       return
     }
     this.atomicWrite("context-v1.json", context)
     this.ctxTokens.set(context.boundUserID, context.contextToken)
+    this.remove(CONTEXT_INVALIDATION_FILE_NAME)
   }
 
   loadCursor(): string {
@@ -102,6 +106,12 @@ export class WeChatStore {
 
   commitBinding(account: AccountData, context: WeChatContext, cursor: string): void {
     this.atomicWrite("binding-v1.json", { account, context, cursor })
+    this.remove(CONTEXT_INVALIDATION_FILE_NAME)
+  }
+
+  invalidateContext(): void {
+    // 标记当前会话失效，保留账号凭据与 outbox 供重新绑定后恢复。
+    this.atomicWrite(CONTEXT_INVALIDATION_FILE_NAME, { invalidatedAt: Date.now() })
   }
 
   loadProcessedMessageIDs(): string[] {
@@ -194,6 +204,11 @@ export class WeChatStore {
       null,
       isStoredBinding,
     )
+  }
+
+  private contextIsInvalidated(): boolean {
+    // 失效标记优先于旧 token，防止服务重启后继续发送到过期会话。
+    return fs.existsSync(path.join(this.dir, CONTEXT_INVALIDATION_FILE_NAME))
   }
 
   private atomicWrite(name: string, value: unknown): void {

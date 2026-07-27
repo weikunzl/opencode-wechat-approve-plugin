@@ -4,6 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import test from "node:test"
 
+import { IlinkApiError, IlinkErrorCode } from "../dist/client.js"
 import { WeChatStore } from "../dist/store.js"
 import { WeChatGateway } from "../dist/wechat-gateway.js"
 
@@ -167,6 +168,104 @@ test("retries the durable outbox while the gateway remains running", async () =>
 
   assert.equal(attempts, 2)
   assert.deepEqual(store.loadOutbox(), [])
+})
+
+test("refreshes context from a new message before retrying the outbox", async () => {
+  const { store } = harness()
+  const batches = []
+  const contexts = []
+  let failed = true
+  const gateway = new WeChatGateway(store, {
+    login: async () => {
+      throw new Error("not expected")
+    },
+    poll: async () => batches.shift() ?? { ret: 0, msgs: [] },
+    sendText: async (_to, _text, contextToken) => {
+      contexts.push(contextToken)
+      if (failed) {
+        failed = false
+        throw new IlinkApiError({ endpoint: "/ilink/bot/sendmessage", ret: -2, errmsg: "prepare failed" })
+      }
+    },
+  })
+  const notification = {
+    id: "notice-context-refresh",
+    kind: "done",
+    text: "任务完成",
+    createdAt: 1,
+  }
+
+  await assert.rejects(gateway.send(notification), /prepare failed/)
+  await gateway.pollOnce(async () => {})
+  assert.deepEqual(contexts, ["ctx"])
+  assert.deepEqual(store.loadOutbox(), [notification])
+  batches.push({
+    ret: 0,
+    msgs: [privateText({ senderID: "owner@im.wechat", text: "收到", id: "refresh", token: "fresh-ctx" })],
+  })
+
+  await gateway.pollOnce(async () => {})
+
+  assert.deepEqual(contexts, ["ctx", "fresh-ctx"])
+  assert.equal(store.loadContext().contextToken, "fresh-ctx")
+  assert.deepEqual(store.loadOutbox(), [])
+})
+
+test("requires rebinding after an iLink session timeout", async () => {
+  const { store } = harness()
+  const gateway = new WeChatGateway(store, {
+    login: async () => {
+      throw new Error("not expected")
+    },
+    poll: async () => {
+      throw new IlinkApiError({
+        endpoint: "/ilink/bot/getupdates",
+        ret: 0,
+        errcode: IlinkErrorCode.SessionTimeout,
+        errmsg: "session timeout",
+      })
+    },
+    sendText: async () => {},
+  })
+
+  await assert.rejects(gateway.pollOnce(async () => {}), /ret=0.*errcode=-14/)
+
+  assert.equal(store.loadContext(), null)
+  assert.equal(await gateway.initialize(), "needs-binding")
+
+  store.saveContext({ boundUserID: "owner@im.wechat", contextToken: "fresh-ctx", updatedAt: 2 })
+  assert.equal(store.loadContext().contextToken, "fresh-ctx")
+})
+
+test("includes redacted transport diagnostics without credentials", async () => {
+  const { store } = harness()
+  const error = new IlinkApiError({
+    endpoint: "/ilink/bot/sendmessage",
+    ret: -2,
+    errcode: -2,
+    errmsg: "prepare failed",
+  })
+  const gateway = new WeChatGateway(store, {
+    login: async () => {
+      throw new Error("not expected")
+    },
+    poll: async () => ({ ret: 0, msgs: [] }),
+    sendText: async () => {
+      throw error
+    },
+  })
+
+  await assert.rejects(
+    gateway.send({ id: "notice-diagnostic", kind: "done", text: "完成", createdAt: 1 }),
+    (caught) => {
+      assert.match(caught.message, /ret=-2.*errcode=-2.*prepare failed/)
+      assert.match(caught.message, /baseHost=example\.invalid/)
+      assert.match(caught.message, /contextAgeMs=/)
+      assert.doesNotMatch(caught.message, /secret|ctx|owner@im\.wechat/)
+      return true
+    },
+  )
+  assert.equal(error.code, -2)
 })
 
 test("stop waits for an in-flight poll and never dispatches its response", async () => {

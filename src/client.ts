@@ -8,6 +8,51 @@ const ILINK_BASE = "https://ilinkai.weixin.qq.com"
 const BOT_TYPE = "3"
 const LONG_POLL_TIMEOUT_MS = 35_000
 
+export enum IlinkErrorCode {
+  SessionTimeout = -14,
+}
+
+export interface IlinkApiFailure {
+  endpoint: string
+  status?: number
+  ret?: number
+  errcode?: number
+  errmsg?: string
+}
+
+export class IlinkApiError extends Error {
+  readonly details: IlinkApiFailure
+
+  constructor(details: IlinkApiFailure) {
+    const safeDetails = { ...details, errmsg: sanitizeErrorMessage(details.errmsg) }
+    // 保留协议错误字段，便于诊断而不输出请求凭据。
+    super(
+      `微信 API 失败: endpoint=${safeDetails.endpoint} ret=${formatCode(safeDetails.ret)} ` +
+        `errcode=${formatCode(safeDetails.errcode)} errmsg=${safeDetails.errmsg || "unknown"}`,
+    )
+    this.name = "IlinkApiError"
+    this.details = safeDetails
+  }
+
+  get code(): number | undefined {
+    return failureCode(this.details)
+  }
+}
+
+export function isSessionTimeoutError(error: unknown): boolean {
+  // ret 为 0 时仍需识别 errcode=-14，避免继续使用失效上下文。
+  return (
+    error instanceof IlinkApiError &&
+    (error.details.ret === IlinkErrorCode.SessionTimeout ||
+      error.details.errcode === IlinkErrorCode.SessionTimeout)
+  )
+}
+
+export function requiresContextRefresh(error: unknown): boolean {
+  // 只有有明确业务错误码且不是会话失效时，才等待新入站上下文。
+  return error instanceof IlinkApiError && error.code !== undefined && !isSessionTimeoutError(error)
+}
+
 interface QRCodeResponse {
   qrcode?: string
   qrcode_img_content?: string
@@ -124,7 +169,8 @@ export class IlinkClientTransport implements IlinkTransport {
     if (!account) throw new Error("微信尚未登录")
 
     const bodyText = JSON.stringify(body)
-    const response = await this.fetcher(new URL(endpoint, withTrailingSlash(account.baseUrl)), {
+    const url = new URL(endpoint, withTrailingSlash(account.baseUrl))
+    const response = await this.fetcher(url, {
       method: "POST",
       headers: {
         "content-type": "application/json",
@@ -138,20 +184,17 @@ export class IlinkClientTransport implements IlinkTransport {
         : AbortSignal.timeout(timeoutMs),
     })
     const text = await response.text()
-    if (!response.ok) throw new Error(`微信 API 请求失败: HTTP ${response.status}`)
+    if (!response.ok) {
+      throw new IlinkApiError({ endpoint: url.pathname, status: response.status })
+    }
     let parsed: unknown
     try {
       parsed = JSON.parse(text) as unknown
     } catch {
-      throw new Error("微信 API 返回了无效 JSON")
+      throw new IlinkApiError({ endpoint: url.pathname, status: response.status, errmsg: "invalid JSON" })
     }
-    if (isRecord(parsed) && typeof parsed.ret === "number" && parsed.ret !== 0) {
-      const detail =
-        typeof parsed.errmsg === "string" && parsed.errmsg
-          ? parsed.errmsg.slice(0, 200)
-          : String(parsed.ret)
-      throw new Error(`微信 API 业务失败: ${detail}`)
-    }
+    const failure = parseApiFailure(parsed, url.pathname, response.status)
+    if (failure) throw new IlinkApiError(failure)
     return parsed
   }
 
@@ -180,4 +223,45 @@ function sleep(ms: number): Promise<void> {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value))
+}
+
+function parseApiFailure(value: unknown, endpoint: string, status: number): IlinkApiFailure | null {
+  // ret 或 errcode 任一非零都视为业务失败，兼容两种服务端响应形态。
+  if (!isRecord(value)) return null
+  const ret = readNumber(value.ret)
+  const errcode = readNumber(value.errcode)
+  if (failureCode({ ret, errcode }) === undefined) return null
+  return {
+    endpoint,
+    status,
+    ret,
+    errcode,
+    errmsg: sanitizeErrorMessage(typeof value.errmsg === "string" ? value.errmsg : undefined),
+  }
+}
+
+function failureCode(details: Pick<IlinkApiFailure, "ret" | "errcode">): number | undefined {
+  // 优先使用非零 ret，否则兼容仅返回 errcode 的接口。
+  if (typeof details.ret === "number" && details.ret !== 0) return details.ret
+  if (typeof details.errcode === "number" && details.errcode !== 0) return details.errcode
+  return undefined
+}
+
+function readNumber(value: unknown): number | undefined {
+  // 拒绝字符串和无穷值，避免错误码比较被隐式转换影响。
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined
+}
+
+function formatCode(value: number | undefined): string {
+  // 诊断中统一显示缺失错误码，避免输出 undefined。
+  return typeof value === "number" ? String(value) : "none"
+}
+
+function sanitizeErrorMessage(value: string | undefined): string | undefined {
+  // 截断并替换常见凭据格式，防止服务端 errmsg 泄露令牌。
+  if (!value) return undefined
+  return value
+    .slice(0, 200)
+    .replace(/Bearer\s+\S+/gi, "Bearer [REDACTED]")
+    .replace(/(?:context|bot)[_-]?token["'=:\s]+[^\s,}]+/gi, "token=[REDACTED]")
 }

@@ -1,4 +1,5 @@
 import crypto from "node:crypto"
+import { isSessionTimeoutError, requiresContextRefresh } from "./client.js"
 import type { NotificationEnvelope } from "./domain.js"
 import { sanitizeNotificationText } from "./notification-utils.js"
 import { WeChatStore } from "./store.js"
@@ -22,6 +23,7 @@ export class WeChatGateway {
   private running = false
   private pollController: AbortController | null = null
   private pollLoopPromise: Promise<void> | null = null
+  private retryContextGeneration: string | null = null
   private seen: Set<string>
 
   constructor(
@@ -98,7 +100,15 @@ export class WeChatGateway {
     signal?: AbortSignal,
   ): Promise<void> {
     const generation = bindingGeneration(this.store)
-    const response = await this.transport.poll(this.store.loadCursor(), signal)
+    let response: GetUpdatesResponse
+    try {
+      response = await this.transport.poll(this.store.loadCursor(), signal)
+    } catch (error) {
+      if (signal?.aborted) return
+      const diagnostic = formatTransportError(error, this.store)
+      this.handleTransportError(error)
+      throw new Error(diagnostic, { cause: error })
+    }
     if (signal?.aborted) return
     if (generation !== bindingGeneration(this.store)) return
     if (response.ret !== undefined && response.ret !== 0) {
@@ -136,7 +146,7 @@ export class WeChatGateway {
       if (signal?.aborted) return
       await onMessage(parsed.message)
     }
-    if (!signal?.aborted && !binding && this.store.loadOutbox().length > 0) {
+    if (!signal?.aborted && !binding && this.store.loadOutbox().length > 0 && this.canFlushOutbox()) {
       await this.flushOutbox()
     }
   }
@@ -150,16 +160,24 @@ export class WeChatGateway {
     const context = this.store.loadContext()
     if (!context) throw new Error("微信尚未绑定，缺少通知上下文")
 
-    await this.transport.sendText(
-      context.boundUserID,
-      safeNotification.text,
-      context.contextToken,
-      safeNotification.id,
-    )
+    try {
+      await this.transport.sendText(
+        context.boundUserID,
+        safeNotification.text,
+        context.contextToken,
+        safeNotification.id,
+      )
+    } catch (error) {
+      const diagnostic = formatTransportError(error, this.store)
+      if (requiresContextRefresh(error)) this.retryContextGeneration = bindingGeneration(this.store)
+      this.handleTransportError(error)
+      throw new Error(diagnostic, { cause: error })
+    }
     this.store.ackNotification(safeNotification.id)
   }
 
   async flushOutbox(): Promise<void> {
+    if (!this.store.loadContext()) return
     for (const notification of this.store.loadOutbox()) {
       await this.send(notification)
     }
@@ -179,9 +197,25 @@ export class WeChatGateway {
         failures++
         const delay = Math.min(30_000, 500 * 2 ** Math.min(failures, 6)) + Math.floor(Math.random() * 250)
         console.error(`[wechat] 轮询异常: ${redact(error)}`)
+        if (!this.running) return
         await sleep(delay, signal)
       }
     }
+  }
+
+  private handleTransportError(error: unknown): void {
+    // -14 表示会话已失效，停止旧上下文重试并要求用户重新绑定。
+    if (!isSessionTimeoutError(error)) return
+    this.store.invalidateContext()
+    this.running = false
+  }
+
+  private canFlushOutbox(): boolean {
+    // prepare failed 后必须等入站消息带来新 context，避免旧令牌循环重试。
+    if (this.retryContextGeneration === null) return true
+    if (this.retryContextGeneration === bindingGeneration(this.store)) return false
+    this.retryContextGeneration = null
+    return true
   }
 }
 
@@ -235,6 +269,29 @@ function redact(error: unknown): string {
   return text
     .replace(/Bearer\s+\S+/gi, "Bearer [REDACTED]")
     .replace(/context[_-]?token["'=:\s]+[^\s,}]+/gi, "context_token=[REDACTED]")
+    .replace(/bot[_-]?token["'=:\s]+[^\s,}]+/gi, "bot_token=[REDACTED]")
+}
+
+function formatTransportError(error: unknown, store: WeChatStore): string {
+  // 诊断只保留错误字段、主机、摘要和上下文年龄，不记录任何凭据。
+  const account = store.loadAccount()
+  const context = store.loadContext()
+  const contextAge = context && context.updatedAt > 0 ? Math.max(0, Date.now() - context.updatedAt) : "unknown"
+  return `${redact(error)} [baseHost=${baseHost(account?.baseUrl)} account=${summarize(account?.accountId)} ` +
+    `target=${summarize(context?.boundUserID)} contextAgeMs=${contextAge}]`
+}
+
+function baseHost(value: string | undefined): string {
+  try {
+    return value ? new URL(value).host : "none"
+  } catch {
+    return "invalid"
+  }
+}
+
+function summarize(value: string | undefined): string {
+  if (!value) return "none"
+  return crypto.createHash("sha256").update(value).digest("hex").slice(0, 10)
 }
 
 function sleep(ms: number, signal?: AbortSignal): Promise<void> {

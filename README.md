@@ -143,6 +143,7 @@ npx @wekux/opencode-wechat-approve-plugin bind
 | `ServeError` 或端口变化 | 确认只启动一个 `opencode web`，检查 4096 是否被其他进程占用 |
 | `Model not found: opencode/...` | 运行 `doctor`，重新安装并选择 `opencode models` 中存在的完整 provider/model |
 | 能收到旧消息但收不到主动通知 | 运行 `bind`，向机器人发送一次固定文本 `绑定` |
+| `sendmessage` 返回 `prepare failed` | 先查看日志中的 `ret`、`errcode`、`errmsg`、`baseHost` 和 `contextAgeMs`；若为 `-14`，运行 `npx @wekux/opencode-wechat-approve-plugin bind` 强制扫码并发送 `绑定`，再重启 `opencode web`；其他错误可向绑定用户发送一条新消息刷新上下文，outbox 会等待新 context 后重试，不会在旧 context 上连续重试 |
 | 多项目重复通知 | 让其他终端使用 `opencode attach`；插件租约会禁用同一状态目录下的次实例 |
 | 微信回复“继续”没有反应 | 这是 V1 的预期行为；普通消息不会驱动 AI 会话 |
 
@@ -157,6 +158,7 @@ npx @wekux/opencode-wechat-approve-plugin bind
 ├── pending-approvals.json
 ├── approval-conversation.json
 ├── notification-outbox.json
+├── context-invalid.json       # iLink -14 后生成，重新绑定或收到新 context 后清除
 ├── processed-messages.json
 ├── runtime.json
 └── runtime-lease.json

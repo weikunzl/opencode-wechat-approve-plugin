@@ -4,7 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import test from "node:test"
 
-import { IlinkClientTransport } from "../dist/client.js"
+import { IlinkApiError, IlinkClientTransport, IlinkErrorCode } from "../dist/client.js"
 import { WeChatStore } from "../dist/store.js"
 
 test("rejects a successful HTTP response containing a failed WeChat ret code", async () => {
@@ -24,8 +24,47 @@ test("rejects a successful HTTP response containing a failed WeChat ret code", a
 
   await assert.rejects(
     transport.sendText("owner", "hello", "expired", "notice-1"),
-    /context token expired/,
+    (error) => {
+      assert.ok(error instanceof IlinkApiError)
+      assert.match(error.message, /ret=40001/)
+      assert.match(error.message, /errmsg=context token expired/)
+      return true
+    },
   )
+})
+
+test("detects session timeout from errcode when ret is zero", async () => {
+  const store = new WeChatStore(mkdtempSync(join(tmpdir(), "wechat-client-")))
+  store.saveAccount({
+    accountId: "bot",
+    token: "secret",
+    baseUrl: "https://example.invalid",
+    userId: "owner",
+    savedAt: "2026-07-27T00:00:00.000Z",
+  })
+  const transport = new IlinkClientTransport(
+    store,
+    async () => Response.json({ ret: 0, errcode: IlinkErrorCode.SessionTimeout, errmsg: "session timeout" }),
+  )
+
+  await assert.rejects(transport.sendText("owner", "hello", "expired", "notice-timeout"), (error) => {
+    assert.ok(error instanceof IlinkApiError)
+    assert.equal(error.details.ret, 0)
+    assert.equal(error.details.errcode, IlinkErrorCode.SessionTimeout)
+    assert.equal(error.code, IlinkErrorCode.SessionTimeout)
+    return true
+  })
+})
+
+test("sanitizes credentials embedded in an iLink error message", () => {
+  const error = new IlinkApiError({
+    endpoint: "/ilink/bot/sendmessage",
+    ret: -2,
+    errmsg: "context_token=ctx-secret Bearer bot-secret",
+  })
+
+  assert.doesNotMatch(error.message, /ctx-secret|bot-secret/)
+  assert.doesNotMatch(error.details.errmsg, /ctx-secret|bot-secret/)
 })
 
 test("uses a newly committed binding without restarting the transport", async () => {

@@ -22,6 +22,16 @@
 
 CI runs the same suite on Windows, macOS and Linux with Node.js 20.
 
+## Live E2E entry
+
+默认 `npm run test:e2e` 永远不触发扫码。真实验收必须显式运行：
+
+```bash
+npm run test:e2e:live
+```
+
+该入口是扫码后的人工安全记录器，不会自动触发 OpenCode E2E-05/06/07，也不会代替真实会话断言。它每次先强制 bind，显示二维码并要求用户扫码确认；随后操作者必须在会话标题为 `微信ClawBot` 的窗口发送精确文本 `绑定`。脚本确认新的 context 已收到后，才提示人工执行 E2E-05、E2E-06、E2E-07。每个场景开始前都重新确认标题，并记录扫码时间、场景、观察到的微信文本和 request ID；不得记录 token、二维码或本地状态文件。
+
 ## Real WeChat acceptance
 
 本轮真实证据仅包含：已在标题为 `微信ClawBot` 的会话中观察到一次真实 `[Done] E2E approval once`。E2E-05 的失败/取消会话、E2E-06 的 Cancelled/timeout 展示、E2E-07 的 `好的`/`始终允许`/`拒绝` 三种真实回复均为“未验证”。后续 OpenCode→微信链路因微信 API 返回 `prepare failed` 中断，不能用 fake gateway、fake PermissionAPI 或自动化测试替代这些证据。
@@ -48,3 +58,10 @@ mismatch and must not inspect or interact with another conversation.
 
 Record the OpenCode permission request ID, reply payload and resulting WeChat
 text for each approval case. Never record bot tokens or context tokens.
+
+If `sendmessage` reports `prepare failed`, record only the redacted `ret`,
+`errcode`, `errmsg`, `baseHost`, account/target summaries and context age. Do
+not retry indefinitely. Error `-14` invalidates the stored context and requires
+`npx @wekux/opencode-wechat-approve-plugin bind` with a new QR scan and the
+exact `绑定` message, then restart `opencode web`. For other errors, send one new private message to refresh
+the inbound context; the durable outbox is retried after that context is saved.
