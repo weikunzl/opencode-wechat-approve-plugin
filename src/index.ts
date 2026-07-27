@@ -127,7 +127,6 @@ export function createPluginRuntime(dependencies: {
     hooks,
     async start(): Promise<boolean> {
       if (lease && !lease.acquire()) {
-        console.error("[wechat] 另一插件实例已持有微信轮询租约；当前实例已禁用微信处理")
         return false
       }
       if ((await gateway.initialize()) !== "ready") {

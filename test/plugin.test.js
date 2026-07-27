@@ -73,6 +73,9 @@ test("exposes no general-purpose WeChat AI tools or permission interception hook
 
 test("a secondary plugin instance emits no duplicate notifications", async () => {
   const { runtime, gateway } = createHarness()
+  const errors = []
+  const originalError = console.error
+  console.error = (...args) => errors.push(args)
   const secondary = createPluginRuntime({
     gateway,
     approvalManager: {
@@ -89,12 +92,17 @@ test("a secondary plugin instance emits no duplicate notifications", async () =>
     lease: { acquire: () => false, release: () => {} },
   })
 
-  assert.equal(await secondary.start(), false)
-  await secondary.hooks.event({
-    event: { type: "session.idle", properties: { sessionID: "ses-1" } },
-  })
+  try {
+    assert.equal(await secondary.start(), false)
+    await secondary.hooks.event({
+      event: { type: "session.idle", properties: { sessionID: "ses-1" } },
+    })
+  } finally {
+    console.error = originalError
+  }
 
   assert.deepEqual(gateway.sent, [])
+  assert.deepEqual(errors, [])
   assert.equal(runtime.hooks.tool, undefined)
 })
 
