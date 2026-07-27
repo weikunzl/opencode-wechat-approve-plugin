@@ -146,11 +146,21 @@ test("redacts credentials and bounds every outbound WeChat notification", async 
   await gateway.send({
     id: "notice-sensitive",
     kind: "error",
-    text: `Authorization: Bearer top-secret\nAPI_KEY=private-value\n${"x".repeat(3_000)}`,
+    text: [
+      "Authorization: Bearer top-secret",
+      "API_KEY=private-value",
+      "OPENAI_API_KEY=openai-secret",
+      "AWS_SECRET_ACCESS_KEY=aws-secret",
+      "MY_PASSWORD=my-password",
+      "x".repeat(3_000),
+    ].join("\n"),
     createdAt: 1,
   })
 
-  assert.doesNotMatch(sent[0].text, /top-secret|private-value/)
+  assert.doesNotMatch(
+    sent[0].text,
+    /top-secret|private-value|openai-secret|aws-secret|my-password/,
+  )
   assert.match(sent[0].text, /\[REDACTED\]/)
   assert.ok(sent[0].text.length <= 1_800)
 })
