@@ -19,7 +19,7 @@ export function interpretDeterministic(
   const normalized = normalize(text)
   const explicitDecision = parseApprovalDecision(text)
   const inheritedDecision =
-    explicitDecision === null && conversation && isStrictSelectionReply(normalized)
+    explicitDecision === null && conversation && isStrictSelectionReply(text)
       ? conversation.decision
       : null
   const decision = explicitDecision ?? inheritedDecision
@@ -37,6 +37,8 @@ export function interpretDeterministic(
 }
 
 function isStrictSelectionReply(text: string): boolean {
+  if (/[?？]/.test(text)) return false
+  text = normalize(text)
   if (NEGATIVE_MODALITY.test(text)) return false
   if (/^(?:全部|所有|全都|两个都|三个都|都)$/.test(text)) return true
 

@@ -130,6 +130,8 @@ test("inherits a clarification decision only from a strict selection reply", () 
     "不能第一个",
     "先别选第一个",
     "第一个可以吗？",
+    "#1？",
+    "第一个？",
     "docs 最近怎么样",
   ]) {
     assert.equal(interpretDeterministic(text, pending, conversation), null, text)
