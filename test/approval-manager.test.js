@@ -108,6 +108,19 @@ test("preserves the original ordinal snapshot across multiple partial replies", 
   assert.equal(store.loadConversation().selectionOnly, true)
 })
 
+test("keeps a partial ordinal snapshot when OpenCode emits the applied reply", async () => {
+  const { manager, store } = harness([request("r1", 1), request("r2", 2), request("r3", 3)])
+
+  await manager.onMessage(message("第一个允许"))
+  await manager.onPermissionReplied({
+    type: "permission.replied",
+    properties: { sessionID: "ses_1", requestID: "r1", reply: "once" },
+  })
+
+  assert.equal(store.loadConversation().selectionOnly, true)
+  assert.deepEqual(store.loadConversation().requestIDs, ["r1", "r2", "r3"])
+})
+
 test("does not inherit a previous partial decision for a bare ordinal", async () => {
   let modelCalls = 0
   const { manager, replies } = harness([request("r1", 1), request("r2", 2)], {
