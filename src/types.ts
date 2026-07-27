@@ -7,6 +7,7 @@ export type AccountData = {
 }
 
 export type WeChatMessage = {
+  message_id?: string
   from_user_id?: string
   to_user_id?: string
   session_id?: string
