@@ -133,3 +133,48 @@ test("periodically rejects expired approvals and stops the timer on disposal", a
   await runtime.hooks.event({ event: { type: "global.disposed", properties: {} } })
   assert.equal(cleared, true)
 })
+
+test("startup does not wait for OpenCode permission reconciliation", async () => {
+  const gateway = createGateway()
+  let runStartupReconcile
+  let reconcileStarted = false
+  let finishReconcile
+  const reconciliation = new Promise((resolve) => {
+    finishReconcile = resolve
+  })
+  const runtime = createPluginRuntime({
+    gateway,
+    approvalManager: {
+      reconcile: async () => {
+        reconcileStarted = true
+        return reconciliation
+      },
+      onPermissionAsked: async () => [],
+      onPermissionReplied: async () => {},
+      onMessage: async () => [],
+    },
+    sessionNotifier: { handle: async () => [] },
+    timers: {
+      setTimeout: (callback) => {
+        runStartupReconcile = callback
+        return 8
+      },
+      clearTimeout: () => {},
+      setInterval: () => 9,
+      clearInterval: () => {},
+    },
+  })
+
+  const result = await Promise.race([
+    runtime.start(),
+    new Promise((resolve) => setImmediate(() => resolve("blocked"))),
+  ])
+
+  assert.equal(result, true)
+  assert.equal(reconcileStarted, false)
+  runStartupReconcile()
+  await Promise.resolve()
+  assert.equal(reconcileStarted, true)
+  finishReconcile([])
+  await reconciliation
+})

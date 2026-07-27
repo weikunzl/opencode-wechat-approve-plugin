@@ -55,24 +55,34 @@ interface PermissionRepliedLike {
   }
 }
 
+interface RuntimeTimers {
+  setTimeout(callback: () => void, milliseconds: number): unknown
+  clearTimeout(id: unknown): void
+  setInterval(callback: () => void, milliseconds: number): unknown
+  clearInterval(id: unknown): void
+}
+
 export function createPluginRuntime(dependencies: {
   gateway: RuntimeGateway
   approvalManager: RuntimeApprovalManager
   sessionNotifier: RuntimeSessionNotifier
   lease?: { acquire(): boolean; release(): void }
-  timers?: {
-    setInterval(callback: () => void, milliseconds: number): unknown
-    clearInterval(id: unknown): void
-  }
+  timers?: Partial<RuntimeTimers>
 }) {
   const { gateway, approvalManager, sessionNotifier, lease } = dependencies
-  const timers = dependencies.timers ?? {
+  const defaultTimers: RuntimeTimers = {
+    setTimeout: (callback: () => void, milliseconds: number) =>
+      globalThis.setTimeout(callback, milliseconds),
+    clearTimeout: (id: unknown) =>
+      globalThis.clearTimeout(id as ReturnType<typeof globalThis.setTimeout>),
     setInterval: (callback: () => void, milliseconds: number) =>
       globalThis.setInterval(callback, milliseconds),
     clearInterval: (id: unknown) =>
       globalThis.clearInterval(id as ReturnType<typeof globalThis.setInterval>),
   }
+  const timers = { ...defaultTimers, ...dependencies.timers }
   let active = false
+  let startupTimer: unknown = null
   let expiryTimer: unknown = null
 
   const deliver = async (notifications: NotificationEnvelope[]): Promise<void> => {
@@ -89,6 +99,8 @@ export function createPluginRuntime(dependencies: {
     event: async ({ event }: { event: EventLike }): Promise<void> => {
       if (event.type === "global.disposed" || event.type === "server.instance.disposed") {
         active = false
+        if (startupTimer !== null) timers.clearTimeout(startupTimer)
+        startupTimer = null
         if (expiryTimer !== null) timers.clearInterval(expiryTimer)
         expiryTimer = null
         await gateway.stop?.()
@@ -130,16 +142,21 @@ export function createPluginRuntime(dependencies: {
         console.error(`[wechat] 通知队列恢复失败: ${firstLine(error)}`)
       }
 
-      try {
-        await deliver(await approvalManager.reconcile())
-      } catch (error) {
-        console.error(`[wechat] OpenCode 授权状态同步失败: ${firstLine(error)}`)
-      }
-
       gateway.start(async (message) => {
         await deliver(await approvalManager.onMessage(message))
       })
       active = true
+      startupTimer = timers.setTimeout(() => {
+        startupTimer = null
+        if (!active) return
+        void approvalManager
+          .reconcile()
+          .then(deliver)
+          .catch((error) =>
+            console.error(`[wechat] OpenCode 授权状态同步失败: ${firstLine(error)}`),
+          )
+      }, 1_000)
+      unrefTimer(startupTimer)
       if (approvalManager.expire) {
         expiryTimer = timers.setInterval(() => {
           void approvalManager
@@ -149,17 +166,21 @@ export function createPluginRuntime(dependencies: {
               console.error(`[wechat] 授权超时检查失败: ${firstLine(error)}`),
             )
         }, 30_000)
-        if (
-          expiryTimer &&
-          typeof expiryTimer === "object" &&
-          "unref" in expiryTimer &&
-          typeof expiryTimer.unref === "function"
-        ) {
-          expiryTimer.unref()
-        }
+        unrefTimer(expiryTimer)
       }
       return true
     },
+  }
+}
+
+function unrefTimer(timer: unknown): void {
+  if (
+    timer &&
+    typeof timer === "object" &&
+    "unref" in timer &&
+    typeof timer.unref === "function"
+  ) {
+    timer.unref()
   }
 }
 
