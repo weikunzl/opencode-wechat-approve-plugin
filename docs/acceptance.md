@@ -18,9 +18,13 @@
 - ordinary-message isolation
 - JSONC preservation and legacy-state migration
 
+`test/integration.test.js` is an HTTP/内存集成层：它使用 fake gateway、fake fetcher 和 `HttpPermissionAPI`，其中的 approval payload 只证明协议路由，不是微信真实会话证据。`test/semantic-approval.test.js` 使用确定性 fake model，断言原始自然语言、pending request 快照、返回决策以及 once/always/reject 的安全校验；它同样不代表真实模型端到端结果。
+
 CI runs the same suite on Windows, macOS and Linux with Node.js 20.
 
 ## Real WeChat acceptance
+
+本轮真实证据仅包含：已在标题为 `微信ClawBot` 的会话中观察到一次真实 `[Done] E2E approval once`。E2E-05 的失败/取消会话、E2E-06 的 Cancelled/timeout 展示、E2E-07 的 `好的`/`始终允许`/`拒绝` 三种真实回复均为“未验证”。后续 OpenCode→微信链路因微信 API 返回 `prepare failed` 中断，不能用 fake gateway、fake PermissionAPI 或自动化测试替代这些证据。
 
 The following desktop-automation restriction applies only to the maintainer's
 acceptance machine. Before every read or send, the driver must verify that the
