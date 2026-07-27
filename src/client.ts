@@ -124,11 +124,20 @@ export class IlinkClientTransport implements IlinkTransport {
     })
     const text = await response.text()
     if (!response.ok) throw new Error(`微信 API 请求失败: HTTP ${response.status}`)
+    let parsed: unknown
     try {
-      return JSON.parse(text)
+      parsed = JSON.parse(text) as unknown
     } catch {
       throw new Error("微信 API 返回了无效 JSON")
     }
+    if (isRecord(parsed) && typeof parsed.ret === "number" && parsed.ret !== 0) {
+      const detail =
+        typeof parsed.errmsg === "string" && parsed.errmsg
+          ? parsed.errmsg.slice(0, 200)
+          : String(parsed.ret)
+      throw new Error(`微信 API 业务失败: ${detail}`)
+    }
+    return parsed
   }
 
   private async fetchJSON(url: string): Promise<unknown> {
@@ -152,4 +161,8 @@ function isTimeout(error: unknown): boolean {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value))
 }
