@@ -68,14 +68,14 @@ export function commitLocalPlugin(
     pluginSpec: localPluginSpec(configDirectory),
     rollback(): void {
       if (settled) return
-      settled = true
       fs.rmSync(target, { recursive: true, force: true })
       if (hadPrevious && fs.existsSync(backup)) fs.renameSync(backup, target)
+      settled = true
     },
     finalize(): void {
       if (settled) return
-      settled = true
       fs.rmSync(backup, { recursive: true, force: true })
+      settled = true
     },
   }
 }
@@ -185,9 +185,28 @@ export async function install(options: InstallOptions): Promise<void> {
     )
     pluginCommit?.finalize()
   } catch (error) {
-    restoreText(options.configFile, configExisted ? source : null)
-    restoreText(pluginConfigFile, previousPluginConfig)
-    pluginCommit?.rollback()
+    const rollbackErrors: unknown[] = []
+    try {
+      restoreText(options.configFile, configExisted ? source : null)
+    } catch (rollbackError) {
+      rollbackErrors.push(rollbackError)
+    }
+    try {
+      restoreText(pluginConfigFile, previousPluginConfig)
+    } catch (rollbackError) {
+      rollbackErrors.push(rollbackError)
+    }
+    try {
+      pluginCommit?.rollback()
+    } catch (rollbackError) {
+      rollbackErrors.push(rollbackError)
+    }
+    if (rollbackErrors.length > 0) {
+      throw new AggregateError(
+        [error, ...rollbackErrors],
+        "安装失败且回滚不完整，请运行 wechat-approve doctor",
+      )
+    }
     throw error
   }
 }
@@ -206,13 +225,11 @@ function atomicWriteText(file: string, value: string): void {
 }
 
 function restoreText(file: string, value: string | null): void {
-  try {
-    if (value === null) {
-      fs.rmSync(file, { force: true })
-    } else {
-      atomicWriteText(file, value)
-    }
-  } catch {}
+  if (value === null) {
+    fs.rmSync(file, { force: true })
+  } else {
+    atomicWriteText(file, value)
+  }
 }
 
 function detectEOL(value: string): "\r\n" | "\n" {

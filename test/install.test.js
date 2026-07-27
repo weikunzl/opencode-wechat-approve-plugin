@@ -225,6 +225,52 @@ test("rolls back plugin and config when the final state commit fails", async () 
   assert.equal(finalized, false)
 })
 
+test("rolls back plugin and config when plugin finalization fails", async () => {
+  const root = mkdtempSync(join(tmpdir(), "wechat-installer-finalize-rollback-"))
+  const configFile = join(root, "opencode.jsonc")
+  const original = '{ "plugin": ["existing"], "server": { "port": 9000 } }\n'
+  writeFileSync(configFile, original)
+  const store = new WeChatStore(join(root, "state"))
+  store.saveAccount({
+    token: "secret",
+    baseUrl: "https://example.invalid",
+    accountId: "bot",
+    userId: "owner",
+    savedAt: "2026-07-27T00:00:00.000Z",
+  })
+  store.saveContext({
+    boundUserID: "owner",
+    contextToken: "fresh-context",
+    updatedAt: 100,
+  })
+  let rolledBack = false
+
+  await assert.rejects(
+    install({
+      configFile,
+      store,
+      availableModels: ["opencode-go/qwen3.7-max"],
+      configuredModel: "opencode-go/qwen3.7-max",
+      confirmModel: async () => true,
+      bind: async () => {},
+      sendTest: async () => true,
+      commitPlugin: () => ({
+        pluginSpec: "file:///managed/dist/index.js",
+        rollback: () => {
+          rolledBack = true
+        },
+        finalize: () => {
+          throw new Error("backup cleanup failed")
+        },
+      }),
+    }),
+    /backup cleanup failed/,
+  )
+
+  assert.equal(readFileSync(configFile, "utf8"), original)
+  assert.equal(rolledBack, true)
+})
+
 test("migrates a legacy binding before doctor checks the installation", async () => {
   const root = mkdtempSync(join(tmpdir(), "wechat-installer-migration-"))
   const stateDirectory = join(root, "state")
