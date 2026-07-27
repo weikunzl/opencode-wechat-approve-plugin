@@ -1,12 +1,12 @@
 export const WECHAT_STATUS_EMOTICONS = {
-  done: "[庆祝]",
-  error: "[苦涩]",
-  approval: "[让我看看]",
-  approved: "[好的]",
-  rejected: "[NO]",
-  timeout: "[叹气]",
-  warning: "[汗]",
-  help: "[机智]",
+  done: "🎉",
+  error: "😞",
+  approval: "👀",
+  approved: "👍",
+  rejected: "👎",
+  timeout: "⏰",
+  warning: "⚠️",
+  help: "💡",
 } as const
 
 export type WeChatStatus = keyof typeof WECHAT_STATUS_EMOTICONS

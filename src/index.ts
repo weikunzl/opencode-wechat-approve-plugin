@@ -4,6 +4,7 @@ import { tool } from "@opencode-ai/plugin"
 import { WeChatClient } from "./client.js"
 import { WeChatStore } from "./store.js"
 import { formatStatusMessage } from "./status-message.js"
+import { formatError, SessionNotificationState } from "./notification-utils.js"
 
 interface PendingPermission {
   permission: Permission
@@ -33,6 +34,7 @@ export const WeChatPlugin: Plugin = async (input) => {
   }
 
   const pendingPermissions = new Map<string, PendingPermission>()
+  const notificationState = new SessionNotificationState()
   let confirmCounter = 0
 
   const nextConfirmCode = (): string => {
@@ -202,6 +204,7 @@ export const WeChatPlugin: Plugin = async (input) => {
         case "session.idle": {
           const { sessionID } = (event as any).properties || {}
           if (!sessionID) break
+          if (!notificationState.shouldNotifyDone(sessionID)) break
           const title = await getSessionTitle(sessionID)
           await wechat.notifyUser(formatStatusMessage("done", `[Done] ${title}\nAI task completed.`))
           break
@@ -210,8 +213,9 @@ export const WeChatPlugin: Plugin = async (input) => {
         case "session.error": {
           const { sessionID, error } = (event as any).properties || {}
           if (!sessionID) break
+          notificationState.markFailed(sessionID)
           const title = await getSessionTitle(sessionID)
-          const errMsg = error?.message || String(error) || "Unknown error"
+          const errMsg = formatError(error)
           await wechat.notifyUser(formatStatusMessage("error", `[Error] ${title}\n${errMsg.slice(0, 500)}`))
           break
         }
