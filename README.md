@@ -100,10 +100,8 @@ opencode web
 多个待审批：
 
 - `好的`：不立即授权，先询问具体是哪一个
-- `第一个`
-- `1 和 3`
-- `docs 项目的`
-- `npm test 那个`
+- 二次确认只接受纯选择：`#1`、`第一个`、`1 和 3`
+- 也可在第一条回复中直接表达完整意图：`允许 docs 项目的`、`拒绝 npm test 那个`
 - `两个都允许`
 - `两个都始终允许`
 - `只拒绝 git push`
@@ -149,10 +147,8 @@ npx github:weikunzl/opencode-wechat-approve-plugin bind
 
 ```text
 ~/.opencode/wechat-approve/
-├── account.json
+├── binding-v1.json
 ├── config.json
-├── context-v1.json
-├── cursor.json
 ├── pending-approvals.json
 ├── approval-conversation.json
 ├── notification-outbox.json
@@ -160,6 +156,8 @@ npx github:weikunzl/opencode-wechat-approve-plugin bind
 ├── runtime.json
 └── runtime-lease.json
 ```
+
+旧版 `account.json`、`context-v1.json`、`cursor.json` 会在升级时兼容读取；新绑定将账号、上下文和游标原子写入 `binding-v1.json`。
 
 凭据与上下文不会写入日志或微信通知。POSIX 系统使用 `0600` 文件权限；Windows 依赖当前用户配置目录的 ACL 隔离。
 

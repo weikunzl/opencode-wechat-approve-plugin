@@ -10,7 +10,12 @@ import { parse } from "jsonc-parser"
 import qrcode from "qrcode-terminal"
 import { doctorInstallation, parseOpenCodePaths, resolveEffectiveModel } from "./cli.js"
 import { IlinkClientTransport } from "./client.js"
-import { install, PACKAGE_NAME, stageLocalPlugin } from "./install.js"
+import {
+  commitLocalPlugin,
+  install,
+  localPluginSpec,
+  PACKAGE_NAME,
+} from "./install.js"
 import { WeChatStore } from "./store.js"
 import { WeChatGateway } from "./wechat-gateway.js"
 
@@ -26,7 +31,8 @@ async function main(args: string[]): Promise<number> {
 
   const paths = parseOpenCodePaths(await runOpenCode(["debug", "paths"]))
   if (!paths.config || !paths.state) throw new Error("无法解析 OpenCode 配置和状态目录")
-  const configFile = findConfigFile(paths.config)
+  const configDirectory = paths.config
+  const configFile = findConfigFile(configDirectory)
   const stateDirectory = path.join(paths.home || path.dirname(paths.config), ".opencode", "wechat-approve")
   const availableModels = lines(await runOpenCode(["models"]))
 
@@ -55,7 +61,7 @@ async function main(args: string[]): Promise<number> {
   const modelState = readJSON(path.join(paths.state, "model.json"))
   const proposed = resolveEffectiveModel(resolvedConfig, modelState)
   const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
-  const pluginSpec = stageLocalPlugin(packageRoot, paths.config)
+  const pluginSpec = localPluginSpec(configDirectory)
   const terminal = readline.createInterface({ input: process.stdin, output: process.stdout })
   try {
     const configuredModel =
@@ -75,6 +81,7 @@ async function main(args: string[]): Promise<number> {
       bind: async (force) => bind(gateway, force),
       sendTest: async () => sendTest(gateway),
       pluginName: pluginSpec,
+      commitPlugin: () => commitLocalPlugin(packageRoot, configDirectory),
     })
   } finally {
     terminal.close()
@@ -96,7 +103,7 @@ async function sendTest(gateway: WeChatGateway): Promise<boolean> {
   await gateway.send({
     id: `install-test:${Date.now()}`,
     kind: "done",
-    text: "[庆祝] [OpenCode 验证] 微信授权插件已绑定",
+    text: "🎉 [OpenCode 验证] 微信授权插件已绑定",
     createdAt: Date.now(),
   })
   return true

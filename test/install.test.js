@@ -91,12 +91,22 @@ test("persists the confirmed model and finishes only after binding and test deli
       calls.push(["send-test"])
       return true
     },
+    commitPlugin: () => {
+      calls.push(["commit-plugin"])
+      return {
+        pluginSpec: "file:///managed/dist/index.js",
+        rollback: () => calls.push(["rollback-plugin"]),
+        finalize: () => calls.push(["finalize-plugin"]),
+      }
+    },
   })
 
   assert.deepEqual(calls, [
     ["confirm", "opencode-go/qwen3.7-max"],
     ["bind"],
     ["send-test"],
+    ["commit-plugin"],
+    ["finalize-plugin"],
   ])
   assert.equal(store.loadPluginConfig().model, "opencode-go/qwen3.7-max")
   assert.match(readFileSync(configFile, "utf8"), /opencode-wechat-approve-plugin/)
@@ -133,6 +143,86 @@ test("rejects unavailable models and incomplete binding", async () => {
     }),
     /绑定消息/,
   )
+})
+
+test("does not commit plugin or config when binding validation fails", async () => {
+  const root = mkdtempSync(join(tmpdir(), "wechat-installer-rollback-"))
+  const configFile = join(root, "opencode.jsonc")
+  const original = '{ "plugin": ["existing"], "server": { "port": 9000 } }\n'
+  writeFileSync(configFile, original)
+  const store = new WeChatStore(join(root, "state"))
+  let committed = false
+
+  await assert.rejects(
+    install({
+      configFile,
+      store,
+      availableModels: ["opencode-go/qwen3.7-max"],
+      configuredModel: "opencode-go/qwen3.7-max",
+      confirmModel: async () => true,
+      bind: async () => {},
+      sendTest: async () => true,
+      commitPlugin: () => {
+        committed = true
+        throw new Error("must not run")
+      },
+    }),
+    /绑定消息/,
+  )
+
+  assert.equal(committed, false)
+  assert.equal(readFileSync(configFile, "utf8"), original)
+})
+
+test("rolls back plugin and config when the final state commit fails", async () => {
+  const root = mkdtempSync(join(tmpdir(), "wechat-installer-commit-rollback-"))
+  const configFile = join(root, "opencode.jsonc")
+  const original = '{ "plugin": ["existing"], "server": { "port": 9000 } }\n'
+  writeFileSync(configFile, original)
+  const store = new WeChatStore(join(root, "state"))
+  store.saveAccount({
+    token: "secret",
+    baseUrl: "https://example.invalid",
+    accountId: "bot",
+    userId: "owner",
+    savedAt: "2026-07-27T00:00:00.000Z",
+  })
+  store.saveContext({
+    boundUserID: "owner",
+    contextToken: "fresh-context",
+    updatedAt: 100,
+  })
+  let rolledBack = false
+  let finalized = false
+  store.savePluginConfig = () => {
+    throw new Error("state commit failed")
+  }
+
+  await assert.rejects(
+    install({
+      configFile,
+      store,
+      availableModels: ["opencode-go/qwen3.7-max"],
+      configuredModel: "opencode-go/qwen3.7-max",
+      confirmModel: async () => true,
+      bind: async () => {},
+      sendTest: async () => true,
+      commitPlugin: () => ({
+        pluginSpec: "file:///managed/dist/index.js",
+        rollback: () => {
+          rolledBack = true
+        },
+        finalize: () => {
+          finalized = true
+        },
+      }),
+    }),
+    /state commit failed/,
+  )
+
+  assert.equal(readFileSync(configFile, "utf8"), original)
+  assert.equal(rolledBack, true)
+  assert.equal(finalized, false)
 })
 
 test("migrates a legacy binding before doctor checks the installation", async () => {

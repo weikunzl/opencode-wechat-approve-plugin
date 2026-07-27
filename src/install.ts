@@ -7,7 +7,28 @@ import { WeChatStore } from "./store.js"
 
 export const PACKAGE_NAME = "opencode-wechat-approve-plugin"
 
-export function stageLocalPlugin(sourceRoot: string, configDirectory: string): string {
+export interface PluginCommit {
+  pluginSpec: string
+  rollback(): void
+  finalize(): void
+}
+
+export function localPluginSpec(configDirectory: string): string {
+  return pathToFileURL(
+    path.join(
+      configDirectory,
+      "managed-plugins",
+      PACKAGE_NAME,
+      "dist",
+      "index.js",
+    ),
+  ).href
+}
+
+export function commitLocalPlugin(
+  sourceRoot: string,
+  configDirectory: string,
+): PluginCommit {
   const sourceDist = path.join(sourceRoot, "dist")
   const sourcePackage = path.join(sourceRoot, "package.json")
   if (!fs.existsSync(path.join(sourceDist, "index.js")) || !fs.existsSync(sourcePackage)) {
@@ -23,23 +44,46 @@ export function stageLocalPlugin(sourceRoot: string, configDirectory: string): s
   const backup = `${target}.previous`
   fs.mkdirSync(managedDirectory, { recursive: true })
   fs.mkdirSync(temporary)
+  let hadPrevious = false
   try {
     fs.cpSync(sourceDist, path.join(temporary, "dist"), { recursive: true })
     fs.copyFileSync(sourcePackage, path.join(temporary, "package.json"))
     if (fs.existsSync(backup)) fs.rmSync(backup, { recursive: true, force: true })
-    if (fs.existsSync(target)) fs.renameSync(target, backup)
+    if (fs.existsSync(target)) {
+      fs.renameSync(target, backup)
+      hadPrevious = true
+    }
     try {
       fs.renameSync(temporary, target)
     } catch (error) {
       if (fs.existsSync(backup) && !fs.existsSync(target)) fs.renameSync(backup, target)
       throw error
     }
-    fs.rmSync(backup, { recursive: true, force: true })
   } catch (error) {
     fs.rmSync(temporary, { recursive: true, force: true })
     throw error
   }
-  return pathToFileURL(path.join(target, "dist", "index.js")).href
+  let settled = false
+  return {
+    pluginSpec: localPluginSpec(configDirectory),
+    rollback(): void {
+      if (settled) return
+      settled = true
+      fs.rmSync(target, { recursive: true, force: true })
+      if (hadPrevious && fs.existsSync(backup)) fs.renameSync(backup, target)
+    },
+    finalize(): void {
+      if (settled) return
+      settled = true
+      fs.rmSync(backup, { recursive: true, force: true })
+    },
+  }
+}
+
+export function stageLocalPlugin(sourceRoot: string, configDirectory: string): string {
+  const commit = commitLocalPlugin(sourceRoot, configDirectory)
+  commit.finalize()
+  return commit.pluginSpec
 }
 
 interface ConfigPatch {
@@ -57,6 +101,7 @@ interface InstallOptions {
   bind(force: boolean): Promise<void>
   sendTest(): Promise<boolean>
   pluginName?: string
+  commitPlugin?(): PluginCommit
   hostname?: string
   port?: number
 }
@@ -103,7 +148,6 @@ export async function install(options: InstallOptions): Promise<void> {
     hostname: options.hostname ?? "127.0.0.1",
     port: options.port ?? 4096,
   })
-  atomicWriteText(options.configFile, updated)
 
   const previousContext = options.store.loadContext()
   const forceBinding =
@@ -121,15 +165,31 @@ export async function install(options: InstallOptions): Promise<void> {
   }
   if (!(await options.sendTest())) throw new Error("微信测试通知发送失败")
 
-  options.store.savePluginConfig(
-    loadPluginConfig({
-      model,
-      server: {
-        hostname: options.hostname ?? "127.0.0.1",
-        port: options.port ?? 4096,
-      },
-    }),
-  )
+  const pluginConfigFile = path.join(options.store.getDirectory(), "config.json")
+  const previousPluginConfig = fs.existsSync(pluginConfigFile)
+    ? fs.readFileSync(pluginConfigFile, "utf8")
+    : null
+  const configExisted = fs.existsSync(options.configFile)
+  let pluginCommit: PluginCommit | null = null
+  try {
+    pluginCommit = options.commitPlugin?.() ?? null
+    atomicWriteText(options.configFile, updated)
+    options.store.savePluginConfig(
+      loadPluginConfig({
+        model,
+        server: {
+          hostname: options.hostname ?? "127.0.0.1",
+          port: options.port ?? 4096,
+        },
+      }),
+    )
+    pluginCommit?.finalize()
+  } catch (error) {
+    restoreText(options.configFile, configExisted ? source : null)
+    restoreText(pluginConfigFile, previousPluginConfig)
+    pluginCommit?.rollback()
+    throw error
+  }
 }
 
 function atomicWriteText(file: string, value: string): void {
@@ -143,6 +203,16 @@ function atomicWriteText(file: string, value: string): void {
     fs.closeSync(descriptor)
   }
   fs.renameSync(temporary, file)
+}
+
+function restoreText(file: string, value: string | null): void {
+  try {
+    if (value === null) {
+      fs.rmSync(file, { force: true })
+    } else {
+      atomicWriteText(file, value)
+    }
+  } catch {}
 }
 
 function detectEOL(value: string): "\r\n" | "\n" {
