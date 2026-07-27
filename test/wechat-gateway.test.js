@@ -248,6 +248,9 @@ test("redacts credentials and bounds every outbound WeChat notification", async 
       "AWS_SECRET_ACCESS_KEY=aws-secret",
       "MY_PASSWORD=my-password",
       '{"OPENAI_API_KEY":"json-openai-secret","AWS_SECRET_ACCESS_KEY":"json-aws-secret"}',
+      "{'AWS_SECRET_ACCESS_KEY':'single-quoted-secret'}",
+      '{"MY_PASSWORD":123456}',
+      "API_KEY=abc,def",
       "x".repeat(3_000),
     ].join("\n"),
     createdAt: 1,
@@ -255,7 +258,7 @@ test("redacts credentials and bounds every outbound WeChat notification", async 
 
   assert.doesNotMatch(
     sent[0].text,
-    /top-secret|private-value|openai-secret|aws-secret|my-password|json-openai-secret|json-aws-secret/,
+    /top-secret|private-value|openai-secret|aws-secret|my-password|json-openai-secret|json-aws-secret|single-quoted-secret|123456|\babc\b|\bdef\b/,
   )
   assert.match(sent[0].text, /\[REDACTED\]/)
   assert.ok(sent[0].text.length <= 1_800)

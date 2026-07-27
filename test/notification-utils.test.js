@@ -10,4 +10,8 @@ test("formats structured errors without object coercion", () => {
     "Model not found: provider/model",
   )
   assert.equal(formatError({ code: "MODEL_NOT_FOUND", provider: "opencode" }), '{"code":"MODEL_NOT_FOUND","provider":"opencode"}')
+  assert.equal(
+    formatError({ name: "AuthError", MY_PASSWORD: 123456, nested: { API_KEY: "secret" } }),
+    '{"name":"AuthError","MY_PASSWORD":"[REDACTED]","nested":{"API_KEY":"[REDACTED]"}}',
+  )
 })

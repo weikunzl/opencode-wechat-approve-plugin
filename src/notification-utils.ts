@@ -12,7 +12,7 @@ export function formatError(error: unknown): string {
     if (typeof nestedMessage === "string" && nestedMessage) return firstLine(nestedMessage)
 
     try {
-      return JSON.stringify(error)
+      return JSON.stringify(redactSensitiveValues(error))
     } catch {
       return "Unknown error"
     }
@@ -25,8 +25,16 @@ export function sanitizeNotificationText(text: string, limit = 1_800): string {
   const redacted = text
     .replace(/\bBearer\s+[^\s,;}\]]+/gi, "Bearer [REDACTED]")
     .replace(
-      /("(?:[a-z0-9_-]*(?:authorization|api[_-]?key|access[_-]?token|context[_-]?token|password|passwd|secret(?:[_-]?access[_-]?key)?))"\s*:\s*)"(?:\\.|[^"\\])*"/gim,
+      /(^|\n)(\s*[a-z0-9_-]*(?:authorization|api[_-]?key|access[_-]?token|context[_-]?token|password|passwd|secret(?:[_-]?access[_-]?key)?)\s*=\s*)[^\r\n]*/gim,
+      "$1$2[REDACTED]",
+    )
+    .replace(
+      /("(?:[a-z0-9_-]*(?:authorization|api[_-]?key|access[_-]?token|context[_-]?token|password|passwd|secret(?:[_-]?access[_-]?key)?))"\s*:\s*)(?:"(?:\\.|[^"\\])*"|-?\d+(?:\.\d+)?|true|false|null)/gim,
       '$1"[REDACTED]"',
+    )
+    .replace(
+      /('(?:[a-z0-9_-]*(?:authorization|api[_-]?key|access[_-]?token|context[_-]?token|password|passwd|secret(?:[_-]?access[_-]?key)?))'\s*:\s*)'(?:\\.|[^'\\])*'/gim,
+      "$1'[REDACTED]'",
     )
     .replace(
       /(^|[^a-z0-9])([a-z0-9_-]*(?:authorization|api[_-]?key|access[_-]?token|context[_-]?token|password|passwd|secret(?:[_-]?access[_-]?key)?))(\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\s,;}\]]+)/gim,
@@ -36,4 +44,26 @@ export function sanitizeNotificationText(text: string, limit = 1_800): string {
   if (redacted.length <= limit) return redacted
   const suffix = "\n…[truncated]"
   return `${redacted.slice(0, Math.max(0, limit - suffix.length))}${suffix}`
+}
+
+function redactSensitiveValues(value: unknown, seen = new WeakSet<object>()): unknown {
+  if (!value || typeof value !== "object") return value
+  if (seen.has(value)) return "[Circular]"
+  seen.add(value)
+  if (Array.isArray(value)) {
+    return value.map((item) => redactSensitiveValues(item, seen))
+  }
+  const output: Record<string, unknown> = {}
+  for (const [key, item] of Object.entries(value)) {
+    output[key] = isSensitiveKey(key)
+      ? "[REDACTED]"
+      : redactSensitiveValues(item, seen)
+  }
+  return output
+}
+
+function isSensitiveKey(key: string): boolean {
+  return /(?:authorization|api[_-]?key|access[_-]?token|context[_-]?token|password|passwd|secret(?:[_-]?access[_-]?key)?)/i.test(
+    key,
+  )
 }
