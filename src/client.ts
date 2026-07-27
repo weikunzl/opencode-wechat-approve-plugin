@@ -31,8 +31,8 @@ export class IlinkClientTransport implements IlinkTransport {
     this.account = store.loadAccount()
   }
 
-  async login(onQRCode?: (value: string) => void): Promise<AccountData> {
-    if (this.account) return this.account
+  async login(onQRCode?: (value: string) => void, force = false): Promise<AccountData> {
+    if (this.account && !force) return this.account
 
     const response = await this.fetchJSON(
       `${ILINK_BASE}/ilink/bot/get_bot_qrcode?bot_type=${encodeURIComponent(BOT_TYPE)}`,

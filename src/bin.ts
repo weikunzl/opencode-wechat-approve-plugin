@@ -45,7 +45,7 @@ async function main(args: string[]): Promise<number> {
   const store = new WeChatStore(stateDirectory)
   const gateway = new WeChatGateway(store, new IlinkClientTransport(store))
   if (command === "bind") {
-    await bind(gateway)
+    await bind(gateway, true)
     await sendTest(gateway)
     process.stdout.write("微信绑定及测试通知成功。\n")
     return 0
@@ -84,11 +84,11 @@ async function main(args: string[]): Promise<number> {
   return 0
 }
 
-async function bind(gateway: WeChatGateway): Promise<void> {
+async function bind(gateway: WeChatGateway, force = false): Promise<void> {
   process.stdout.write("请使用微信扫码并确认，然后向机器人发送“绑定”。\n")
   await gateway.bind((value) => {
     qrcode.generate(value, { small: true }, (rendered) => process.stdout.write(`${rendered}\n`))
-  })
+  }, force)
 }
 
 async function sendTest(gateway: WeChatGateway): Promise<boolean> {

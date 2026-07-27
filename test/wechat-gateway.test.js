@@ -136,3 +136,57 @@ test("deduplicates an inbound message after a process restart", async () => {
 
   assert.deepEqual(messages.map((message) => message.messageID), ["m-restart"])
 })
+
+test("binding ignores ordinary text and persists only the exact binding message context", async () => {
+  const { store } = harness()
+  const loginCalls = []
+  const batches = [
+    {
+      ret: 0,
+      get_updates_buf: "cursor-ordinary",
+      msgs: [
+        privateText({
+          senderID: "new-owner@im.wechat",
+          text: "今天天气怎么样",
+          id: "ordinary",
+          token: "wrong-context",
+        }),
+      ],
+    },
+    {
+      ret: 0,
+      get_updates_buf: "cursor-binding",
+      msgs: [
+        privateText({
+          senderID: "new-owner@im.wechat",
+          text: "绑定",
+          id: "binding",
+          token: "correct-context",
+        }),
+      ],
+    },
+  ]
+  const gateway = new WeChatGateway(store, {
+    login: async (_onQRCode, force) => {
+      loginCalls.push(force)
+      return {
+        accountId: "new-bot",
+        token: "new-secret",
+        baseUrl: "https://example.invalid",
+        userId: "new-owner@im.wechat",
+        savedAt: "2026-07-27T00:00:00.000Z",
+      }
+    },
+    poll: async () => batches.shift(),
+    sendText: async () => {},
+  })
+
+  await gateway.bind(undefined, true)
+
+  assert.deepEqual(loginCalls, [true])
+  assert.deepEqual(store.loadContext(), {
+    boundUserID: "new-owner@im.wechat",
+    contextToken: "correct-context",
+    updatedAt: 1,
+  })
+})

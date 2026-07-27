@@ -12,7 +12,7 @@ export interface InboundApprovalMessage {
 }
 
 export interface IlinkTransport {
-  login(onQRCode?: (value: string) => void): Promise<AccountData>
+  login(onQRCode?: (value: string) => void, force?: boolean): Promise<AccountData>
   poll(cursor: string): Promise<GetUpdatesResponse>
   sendText(to: string, text: string, contextToken: string, idempotencyKey: string): Promise<void>
 }
@@ -32,15 +32,17 @@ export class WeChatGateway {
     return this.store.loadAccount() && this.store.loadContext() ? "ready" : "needs-binding"
   }
 
-  async bind(onQRCode?: (value: string) => void): Promise<void> {
-    const account = await this.transport.login(onQRCode)
+  async bind(onQRCode?: (value: string) => void, force = false): Promise<void> {
+    if (!force && this.store.loadAccount() && this.store.loadContext()) return
+    const account = await this.transport.login(onQRCode, force)
     this.store.saveAccount(account)
 
-    while (!this.store.loadContext()) {
+    let bound = false
+    while (!bound) {
       await this.pollOnce(async (message) => {
-        if (message.senderID !== account.userId || normalize(message.text) !== "绑定") return
-        const context = this.store.loadContext()
-        if (!context) throw new Error("绑定消息缺少上下文令牌")
+        if (message.senderID === account.userId && normalize(message.text) === "绑定") {
+          bound = true
+        }
       }, true)
     }
   }
@@ -70,7 +72,7 @@ export class WeChatGateway {
 
     const account = this.store.loadAccount()
     const current = this.store.loadContext()
-    const ownerID = current?.boundUserID ?? account?.userId
+    const ownerID = binding ? account?.userId : current?.boundUserID ?? account?.userId
 
     for (const raw of response.msgs ?? []) {
       const parsed = parseInbound(raw)
@@ -79,6 +81,11 @@ export class WeChatGateway {
 
       this.seen.add(parsed.message.messageID)
       this.store.saveProcessedMessageIDs([...this.seen])
+      const bindingMessage = binding && normalize(parsed.message.text) === "绑定"
+      if (binding && !bindingMessage) continue
+      if (bindingMessage && !parsed.contextToken) {
+        throw new Error("绑定消息缺少上下文令牌")
+      }
       if (parsed.contextToken) {
         this.store.saveContext({
           boundUserID: ownerID,
@@ -87,7 +94,6 @@ export class WeChatGateway {
         })
       }
 
-      if (binding && normalize(parsed.message.text) !== "绑定") continue
       await onMessage(parsed.message)
     }
   }
