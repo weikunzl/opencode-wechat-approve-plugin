@@ -210,7 +210,7 @@ export const WeChatPlugin: Plugin = async (input) => {
         case "session.error": {
           const { sessionID, error } = (event as any).properties || {}
           if (!sessionID) break
-          notificationState.markFailed(sessionID)
+          if (!notificationState.markFailed(sessionID)) break
           const title = await getSessionTitle(sessionID)
           const errMsg = formatError(error)
           await wechat.notifyUser(formatStatusMessage("error", `[Error] ${title}\n${errMsg.slice(0, 500)}`))
