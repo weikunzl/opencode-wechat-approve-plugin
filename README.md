@@ -1,5 +1,10 @@
 # OpenCode WeChat Approve
 
+[![CI](https://github.com/weikunzl/opencode-wechat-approve-plugin/actions/workflows/ci.yml/badge.svg)](https://github.com/weikunzl/opencode-wechat-approve-plugin/actions/workflows/ci.yml)
+[![Coverage](https://codecov.io/gh/weikunzl/opencode-wechat-approve-plugin/branch/main/graph/badge.svg)](https://codecov.io/gh/weikunzl/opencode-wechat-approve-plugin)
+[![Node.js >=20](https://img.shields.io/badge/Node.js-%3E%3D20-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
+[![License](https://img.shields.io/github/license/weikunzl/opencode-wechat-approve-plugin.svg)](LICENSE)
+
 通过微信接收一个中心 OpenCode 服务中所有会话的完成、失败、取消和权限审批通知。
 
 V1 是通知与审批插件，不是聊天机器人：普通微信消息不会创建、继续或提示任何 OpenCode 会话。
@@ -167,6 +172,7 @@ npx github:weikunzl/opencode-wechat-approve-plugin bind
 npm ci
 npm test
 npm run build
+npm run coverage
 ```
 
 测试在 Windows、macOS 和 Linux 上运行。
