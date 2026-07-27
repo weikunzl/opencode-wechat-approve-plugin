@@ -186,7 +186,7 @@ export class ApprovalManager {
           `approval-clarify:${message.messageID}`,
           "approval",
           "approval",
-          `[Which approval?]\n${formatPending(pending)}\n请回复“第一个”“docs 项目的”或“两个都”。`,
+          `[Which approval?]\n${formatPending(pending)}\n请回复“#编号”“第一个”“docs 项目的”或“两个都”。`,
         ),
       ]
     }
@@ -279,8 +279,8 @@ function versionOf(pending: PendingApproval[]): string {
 function formatPending(pending: PendingApproval[]): string {
   return pending
     .map(
-      (item, index) =>
-        `${index + 1}. [${path.basename(item.project) || item.project}] ${item.patterns.join(", ") || item.permission}`,
+      (item) =>
+        `#${item.code} [${path.basename(item.project) || item.project}] ${item.patterns.join(", ") || item.permission}`,
     )
     .join("\n")
 }

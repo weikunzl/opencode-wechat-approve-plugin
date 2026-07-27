@@ -66,13 +66,26 @@ test("asks a follow-up and applies the inherited decision to the selected reques
   const { manager, replies, store } = harness([request("r1", 1), request("r2", 2)])
 
   const clarification = await manager.onMessage(message("好的"))
-  assert.match(clarification[0].text, /1\./)
-  assert.match(clarification[0].text, /2\./)
+  assert.match(clarification[0].text, /#1/)
+  assert.match(clarification[0].text, /#2/)
   assert.equal(store.loadConversation().decision, "once")
 
   await manager.onMessage(message("第一个"))
 
   assert.deepEqual(replies, [["r1", "once"]])
+})
+
+test("displays and resolves the same persistent approval codes", async () => {
+  const { manager, replies } = harness([request("r2", 2), request("r3", 3)])
+
+  const clarification = await manager.onMessage(message("好的"))
+  assert.match(clarification[0].text, /#2/)
+  assert.match(clarification[0].text, /#3/)
+  assert.doesNotMatch(clarification[0].text, /1\./)
+
+  await manager.onMessage(message("3"))
+
+  assert.deepEqual(replies, [["r3", "once"]])
 })
 
 test("rechecks pending requests before applying a clarified selection", async () => {
