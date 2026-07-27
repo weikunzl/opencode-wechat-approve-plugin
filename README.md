@@ -181,10 +181,6 @@ npm run build
 - 模型输出必须通过请求 ID、结构、置信度和授权范围校验
 - 普通微信消息不创建或推进 OpenCode 会话
 
-## 致谢
-
-项目基于 [Ikaros12643/opencode-wechat-plugin](https://github.com/Ikaros12643/opencode-wechat-plugin) 的 iLink 连接思路，并参考 [Johnixr/claude-code-wechat-channel](https://github.com/Johnixr/claude-code-wechat-channel)。
-
 ## License
 
 [MIT](LICENSE)
