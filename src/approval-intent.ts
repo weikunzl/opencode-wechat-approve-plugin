@@ -17,7 +17,12 @@ export function interpretDeterministic(
   conversation: ApprovalConversation | null = null,
 ): ApprovalIntent | null {
   const normalized = normalize(text)
-  const decision = parseApprovalDecision(normalized) ?? conversation?.decision ?? null
+  const explicitDecision = parseApprovalDecision(text)
+  const inheritedDecision =
+    explicitDecision === null && conversation && isStrictSelectionReply(normalized)
+      ? conversation.decision
+      : null
+  const decision = explicitDecision ?? inheritedDecision
   if (!decision) return null
   if (pending.length === 0) return clarify("没有待审批请求")
 
@@ -29,6 +34,18 @@ export function interpretDeterministic(
   if (selected.length === 0) return clarify("存在多个待审批请求，需要确认目标")
 
   return resolved(selected, decision)
+}
+
+function isStrictSelectionReply(text: string): boolean {
+  if (NEGATIVE_MODALITY.test(text)) return false
+  if (/^(?:全部|所有|全都|两个都|三个都|都)$/.test(text)) return true
+
+  const selectors = text.match(/(?:第(?:一|二|三|1|2|3)个)|(?:(?:c|#)\s*)?\d+/g)
+  if (!selectors?.length) return false
+  const remainder = text
+    .replace(/(?:第(?:一|二|三|1|2|3)个)|(?:(?:c|#)\s*)?\d+/g, "")
+    .replace(/(?:和|与|及|以及|、|\s)+/g, "")
+  return remainder.length === 0
 }
 
 export function parseApprovalDecision(text: string): "once" | "always" | "reject" | null {

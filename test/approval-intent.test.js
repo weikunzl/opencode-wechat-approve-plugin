@@ -116,3 +116,29 @@ test("inherits the decision during a clarification conversation", () => {
     explanation: "deterministic",
   })
 })
+
+test("inherits a clarification decision only from a strict selection reply", () => {
+  const pending = [approval("r1", 1), approval("r2", 2)]
+  const conversation = {
+    version: "r1,r2",
+    requestIDs: ["r1", "r2"],
+    decision: "once",
+    createdAt: 1,
+  }
+
+  for (const text of [
+    "不能第一个",
+    "先别选第一个",
+    "第一个可以吗？",
+    "docs 最近怎么样",
+  ]) {
+    assert.equal(interpretDeterministic(text, pending, conversation), null, text)
+  }
+
+  assert.equal(interpretDeterministic("#1", pending, conversation).decision, "once")
+  assert.equal(interpretDeterministic("第一个", pending, conversation).decision, "once")
+  assert.deepEqual(
+    interpretDeterministic("1 和 2", pending, conversation).requestIDs,
+    ["r1", "r2"],
+  )
+})
