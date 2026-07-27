@@ -149,20 +149,22 @@ export class ApprovalManager {
 
     const localDecision = parseApprovalDecision(message.text) ?? conversation?.decision ?? null
     let intent = interpretDeterministic(message.text, pending, conversation)
-    if (
-      localDecision &&
-      this.interpretModel &&
-      hasSelectionDescription(message.text) &&
-      (!intent || intent.decision === "clarify")
-    ) {
+    if (this.interpretModel && (!intent || intent.decision === "clarify")) {
       const selected = await this.interpretModel(
         message.text,
         pending,
         this.modelConfidenceThreshold,
       )
       if (!isActive()) return []
-      if (selected.decision !== "clarify") {
-        intent = { ...selected, decision: localDecision }
+      if (selected.decision !== "clarify" && localDecision && selected.decision === localDecision) {
+        intent = selected
+      } else {
+        intent = {
+          requestIDs: [],
+          decision: "clarify",
+          confidence: 0,
+          explanation: "模型不能建立或改变用户的授权决定",
+        }
       }
     }
     if (!intent) return []
@@ -218,9 +220,10 @@ export class ApprovalManager {
         continue
       }
       try {
-        const applied = await this.api.reply(requestID, intent.decision)
+        const decision = intent.decisions?.[requestID] ?? intent.decision
+        const applied = await this.api.reply(requestID, decision)
         if (!isActive()) return []
-        results.push(`#${approval.code}: ${applied ? label(intent.decision) : "未应用"}`)
+        results.push(`#${approval.code}: ${applied ? label(decision) : "未应用"}`)
       } catch (error) {
         results.push(`#${approval.code}: 失败（${firstLine(error)}）`)
       }
@@ -231,7 +234,7 @@ export class ApprovalManager {
     if (!isActive()) return []
     this.store.savePendingApprovals(remaining)
     this.store.saveConversation(null)
-    return [
+    const notices = [
       this.notice(
         `approval-result:${message.messageID}`,
         "approval-result",
@@ -239,6 +242,17 @@ export class ApprovalManager {
         `[Approval result]\n${results.join("\n")}`,
       ),
     ]
+    if (remaining.length > 0 && intent.requestIDs.length < latest.length) {
+      notices.push(
+        this.notice(
+          `approval-follow-up:${message.messageID}`,
+          "approval",
+          "approval",
+          `[Approval pending]\n还有 ${remaining.length} 个待审批请求，请继续回复处理方式。\n${formatPending(remaining)}\n可回复“全部允许”“全部始终允许”“全部拒绝”，或指定“第一个允许”等。`,
+        ),
+      )
+    }
+    return notices
   }
 
   async expire(
@@ -322,16 +336,4 @@ function label(decision: "once" | "always" | "reject"): string {
 
 function firstLine(error: unknown): string {
   return (error instanceof Error ? error.message : String(error)).split(/\r?\n/, 1)[0]
-}
-
-function hasSelectionDescription(text: string): boolean {
-  const remainder = text
-    .normalize("NFKC")
-    .toLowerCase()
-    .replace(
-      /allow\s*all|always|deny|reject|approve|allow|okay|yes|始终允许|永久允许|以后都允许|全部授权|好的|好啊|可以|是的|确认|同意|允许|通过|拒绝|不同意|不允许|不可以|不通过|不确认|不要|别执行|取消/g,
-      "",
-    )
-    .replace(/[\s,.，。!！?？;；:#]/g, "")
-  return remainder.length >= 2
 }

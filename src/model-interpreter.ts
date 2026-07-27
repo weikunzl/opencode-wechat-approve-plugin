@@ -4,6 +4,7 @@ import { parseApprovalDecision } from "./approval-intent.js"
 export interface ApprovalIntent {
   requestIDs: string[]
   decision: "once" | "always" | "reject" | "clarify"
+  decisions?: Record<string, "once" | "always" | "reject">
   confidence: number
   explanation: string
 }

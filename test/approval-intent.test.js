@@ -24,8 +24,21 @@ test("maps clear one-request synonyms without a model", () => {
   assert.equal(interpretDeterministic("全部授权", pending).decision, "always")
   assert.equal(interpretDeterministic("全部允许", pending).decision, "always")
   assert.equal(interpretDeterministic("全部都允许", pending).decision, "always")
+  assert.equal(interpretDeterministic("全部始终允许", pending).decision, "always")
+  assert.equal(interpretDeterministic("全部always", pending).decision, "always")
   assert.equal(interpretDeterministic("allow all", pending).decision, "always")
   assert.equal(interpretDeterministic("不要，拒绝", pending).decision, "reject")
+})
+
+test("maps all-request rejection without a model", () => {
+  const result = interpretDeterministic("全部拒绝", [approval("r1", 1), approval("r2", 2)])
+
+  assert.deepEqual(result, {
+    requestIDs: ["r1", "r2"],
+    decision: "reject",
+    confidence: 1,
+    explanation: "deterministic",
+  })
 })
 
 test("clarifies a bare approval when multiple requests are pending", () => {
@@ -61,6 +74,21 @@ test("selects by ordinal project and operation description", () => {
   assert.deepEqual(interpretDeterministic("拒绝第二个", pending).requestIDs, ["r2"])
   assert.deepEqual(interpretDeterministic("允许 docs 项目的", pending).requestIDs, ["r1"])
   assert.deepEqual(interpretDeterministic("拒绝 git push 那个", pending).requestIDs, ["r2"])
+})
+
+test("parses mixed ordinal decisions in timestamp order", () => {
+  const pending = [
+    { ...approval("later", 1, "/workspace/later"), createdAt: 200 },
+    { ...approval("earlier", 2, "/workspace/earlier"), createdAt: 100 },
+  ]
+
+  assert.deepEqual(interpretDeterministic("第一个允许、第二个拒绝", pending), {
+    requestIDs: ["earlier", "later"],
+    decision: "once",
+    decisions: { earlier: "once", later: "reject" },
+    confidence: 1,
+    explanation: "deterministic",
+  })
 })
 
 test("returns null for ordinary text that is not an approval reply", () => {

@@ -7,7 +7,7 @@ import test from "node:test"
 import { ApprovalManager } from "../dist/approval-manager.js"
 import { WeChatStore } from "../dist/store.js"
 
-function request(id, code, project = "/workspace/docs", patterns = ["npm test"]) {
+function request(id, code, project = "/workspace/docs", patterns = ["npm test"], createdAt = code) {
   return {
     requestID: id,
     sessionID: `ses_${code}`,
@@ -15,7 +15,7 @@ function request(id, code, project = "/workspace/docs", patterns = ["npm test"])
     permission: "bash",
     patterns,
     project,
-    createdAt: code,
+    createdAt,
     expiresAt: 10_000,
   }
 }
@@ -59,6 +59,54 @@ test("routes once always and reject by OpenCode request ID", async () => {
   assert.deepEqual(replies, [
     ["r1", "always"],
     ["r2", "always"],
+  ])
+})
+
+test("applies all-request decisions for Chinese and English all forms", async () => {
+  for (const [text, decision] of [
+    ["全部允许", "always"],
+    ["全部始终允许", "always"],
+    ["全部always", "always"],
+    ["全部拒绝", "reject"],
+  ]) {
+    const { manager, replies } = harness([request("r1", 1), request("r2", 2)])
+
+    await manager.onMessage(message(text))
+
+    assert.deepEqual(replies, [
+      ["r1", decision],
+      ["r2", decision],
+    ], text)
+  }
+})
+
+test("applies mixed ordinal decisions in created-at order", async () => {
+  const { manager, replies } = harness([
+    request("later", 1, "/workspace/later", ["later"], 200),
+    request("earlier", 2, "/workspace/earlier", ["earlier"], 100),
+  ])
+
+  await manager.onMessage(message("第一个允许、第二个拒绝"))
+
+  assert.deepEqual(replies, [
+    ["earlier", "once"],
+    ["later", "reject"],
+  ])
+})
+
+test("asks for the remaining request after a partial decision", async () => {
+  const { manager, replies } = harness([request("r1", 1), request("r2", 2)])
+
+  const notices = await manager.onMessage(message("第一个允许"))
+
+  assert.deepEqual(replies, [["r1", "once"]])
+  assert.match(notices.map((item) => item.text).join("\n"), /还有 1 个待审批请求/)
+
+  await manager.onMessage(message("拒绝"))
+
+  assert.deepEqual(replies, [
+    ["r1", "once"],
+    ["r2", "reject"],
   ])
 })
 
@@ -133,7 +181,7 @@ test("ignores ordinary text when no approval is pending", async () => {
   assert.deepEqual(replies, [])
 })
 
-test("never sends an ordinary pending-request message to the approval model", async () => {
+test("sends an unrecognized pending-request message to the approval model", async () => {
   let modelCalls = 0
   const { manager, replies } = harness([request("r1", 1)], {
     interpretModel: async () => {
@@ -147,7 +195,8 @@ test("never sends an ordinary pending-request message to the approval model", as
     },
   })
 
-  assert.deepEqual(await manager.onMessage(message("今天天气怎么样")), [])
-  assert.equal(modelCalls, 0)
+  const notices = await manager.onMessage(message("今天天气怎么样"))
+  assert.equal(modelCalls, 1)
+  assert.match(notices[0].text, /Approval unclear/)
   assert.deepEqual(replies, [])
 })
