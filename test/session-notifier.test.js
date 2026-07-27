@@ -87,3 +87,30 @@ test("restores busy state and increments run number on the next run", async () =
 
   assert.equal(restored.snapshot()[0].run, 2)
 })
+
+test("ignores lifecycle events from internal approval interpreter sessions", async () => {
+  const root = mkdtempSync(join(tmpdir(), "wechat-session-notifier-internal-"))
+  const store = new WeChatStore(root)
+  const notifier = new SessionNotifier(
+    store,
+    async () => ({ title: "internal", directory: "/workspace" }),
+    () => 100,
+    (sessionID) => sessionID === "ses-internal",
+  )
+
+  assert.deepEqual(
+    await notifier.handle({
+      type: "session.status",
+      properties: { sessionID: "ses-internal", status: { type: "busy" } },
+    }),
+    [],
+  )
+  assert.deepEqual(
+    await notifier.handle({
+      type: "session.idle",
+      properties: { sessionID: "ses-internal" },
+    }),
+    [],
+  )
+  assert.deepEqual(notifier.snapshot(), [])
+})

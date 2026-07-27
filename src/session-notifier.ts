@@ -26,13 +26,14 @@ export class SessionNotifier {
     private readonly store: WeChatStore,
     private readonly resolveMetadata: MetadataResolver,
     private readonly now: () => number = Date.now,
+    private readonly shouldIgnore: (sessionID: string) => boolean = () => false,
   ) {
     for (const state of store.loadSessionStates()) this.states.set(state.sessionID, state)
   }
 
   async handle(event: SessionEventLike): Promise<NotificationEnvelope[]> {
     const sessionID = event.properties?.sessionID
-    if (!sessionID) return []
+    if (!sessionID || this.shouldIgnore(sessionID)) return []
 
     if (event.type === "session.status") {
       const type = event.properties?.status?.type

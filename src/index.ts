@@ -2,7 +2,9 @@ import type { Plugin } from "@opencode-ai/plugin"
 import { ApprovalManager } from "./approval-manager.js"
 import { IlinkClientTransport } from "./client.js"
 import type { NotificationEnvelope } from "./domain.js"
+import { InternalSessionRegistry } from "./internal-session-registry.js"
 import { HttpPermissionAPI } from "./opencode-permissions.js"
+import { OpenCodeApprovalModel } from "./opencode-model.js"
 import { SessionNotifier } from "./session-notifier.js"
 import { WeChatStore } from "./store.js"
 import { WeChatGateway, type InboundApprovalMessage } from "./wechat-gateway.js"
@@ -115,13 +117,26 @@ export function createPluginRuntime(dependencies: {
 export const WeChatPlugin: Plugin = async (input) => {
   const store = new WeChatStore()
   store.migrateLegacyState()
+  const config = store.loadPluginConfig()
+  const internalSessions = new InternalSessionRegistry()
 
   const gateway = new WeChatGateway(store, new IlinkClientTransport(store))
+  const approvalModel = config.model
+    ? new OpenCodeApprovalModel({
+        serverURL: input.serverUrl,
+        directory: input.directory,
+        model: config.model,
+        onInternalSession: (sessionID, active) => internalSessions.update(sessionID, active),
+      })
+    : null
   const approvalManager = new ApprovalManager({
     store,
-    api: new HttpPermissionAPI(input.serverUrl, store, 600_000),
-    approvalTimeoutMs: 600_000,
-    modelConfidenceThreshold: 0.85,
+    api: new HttpPermissionAPI(input.serverUrl, store, config.approvalTimeoutMs),
+    approvalTimeoutMs: config.approvalTimeoutMs,
+    modelConfidenceThreshold: config.modelConfidenceThreshold,
+    interpretModel: approvalModel
+      ? (text, pending, threshold) => approvalModel.interpret(text, pending, threshold)
+      : undefined,
   })
   const sessionNotifier = new SessionNotifier(
     store,
@@ -133,6 +148,8 @@ export const WeChatPlugin: Plugin = async (input) => {
         directory: session?.directory || input.directory,
       }
     },
+    Date.now,
+    (sessionID) => internalSessions.has(sessionID),
   )
   const runtime = createPluginRuntime({ gateway, approvalManager, sessionNotifier })
   await runtime.start()
