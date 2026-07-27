@@ -16,6 +16,11 @@ interface SessionEventLike {
     sessionID?: string
     status?: { type?: string }
     error?: unknown
+    info?: {
+      id?: string
+      title?: string
+      directory?: string
+    }
   }
 }
 
@@ -32,6 +37,22 @@ export class SessionNotifier {
   }
 
   async handle(event: SessionEventLike): Promise<NotificationEnvelope[]> {
+    if (event.type === "session.updated" || event.type === "session.created") {
+      const info = event.properties?.info
+      if (!info?.id || this.shouldIgnore(info.id)) return []
+      const current = this.states.get(info.id)
+      this.states.set(info.id, {
+        sessionID: info.id,
+        phase: current?.phase ?? "idle",
+        run: current?.run ?? 0,
+        title: info.title || current?.title,
+        directory: info.directory || current?.directory,
+        updatedAt: this.now(),
+      })
+      this.persist()
+      return []
+    }
+
     const sessionID = event.properties?.sessionID
     if (!sessionID || this.shouldIgnore(sessionID)) return []
 

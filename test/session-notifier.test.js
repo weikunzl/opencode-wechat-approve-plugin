@@ -114,3 +114,37 @@ test("ignores lifecycle events from internal approval interpreter sessions", asy
   )
   assert.deepEqual(notifier.snapshot(), [])
 })
+
+test("uses session.updated metadata for sessions attached from another project", async () => {
+  const root = mkdtempSync(join(tmpdir(), "wechat-session-notifier-attached-"))
+  const store = new WeChatStore(root)
+  const notifier = new SessionNotifier(
+    store,
+    async () => {
+      throw new Error("not available through the startup project client")
+    },
+    () => 100,
+  )
+
+  await notifier.handle({
+    type: "session.updated",
+    properties: {
+      info: {
+        id: "ses-attached",
+        title: "Attached API task",
+        directory: "C:\\workspace\\api",
+      },
+    },
+  })
+  await notifier.handle({
+    type: "session.status",
+    properties: { sessionID: "ses-attached", status: { type: "busy" } },
+  })
+  const notices = await notifier.handle({
+    type: "session.idle",
+    properties: { sessionID: "ses-attached" },
+  })
+
+  assert.match(notices[0].text, /Attached API task/)
+  assert.match(notices[0].text, /C:\\workspace\\api/)
+})
