@@ -218,3 +218,41 @@ test("stops the gateway immediately when the runtime lease is lost", async () =>
 
   assert.equal(stopped, true)
 })
+
+test("drops a notification completed after the runtime lease is lost", async () => {
+  const gateway = createGateway()
+  let onLost
+  let finishHandle
+  const runtime = createPluginRuntime({
+    gateway,
+    approvalManager: {
+      reconcile: async () => [],
+      onPermissionAsked: async () => [],
+      onPermissionReplied: async () => {},
+      onMessage: async () => [],
+    },
+    sessionNotifier: {
+      handle: async () =>
+        new Promise((resolve) => {
+          finishHandle = resolve
+        }),
+    },
+    lease: {
+      acquire: () => true,
+      release: () => {},
+      setOnLost: (callback) => {
+        onLost = callback
+      },
+    },
+  })
+  await runtime.start()
+  const event = runtime.hooks.event({
+    event: { type: "session.idle", properties: { sessionID: "ses-late" } },
+  })
+
+  onLost()
+  finishHandle([{ id: "late", kind: "done", text: "late", createdAt: 1 }])
+  await event
+
+  assert.deepEqual(gateway.sent, [])
+})

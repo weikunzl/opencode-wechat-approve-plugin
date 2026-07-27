@@ -53,9 +53,10 @@ export class ApprovalManager {
     this.now = options.now ?? Date.now
   }
 
-  async reconcile(): Promise<NotificationEnvelope[]> {
+  async reconcile(isActive: () => boolean = alwaysActive): Promise<NotificationEnvelope[]> {
     const before = this.store.loadPendingApprovals()
     const current = await this.api.list()
+    if (!isActive()) return []
     this.store.savePendingApprovals(current)
 
     const removed = before.filter((item) => !current.some((candidate) => candidate.requestID === item.requestID))
@@ -115,8 +116,12 @@ export class ApprovalManager {
     if (conversation?.requestIDs.includes(event.properties.requestID)) this.store.saveConversation(null)
   }
 
-  async onMessage(message: InboundApprovalMessage): Promise<NotificationEnvelope[]> {
+  async onMessage(
+    message: InboundApprovalMessage,
+    isActive: () => boolean = alwaysActive,
+  ): Promise<NotificationEnvelope[]> {
     const pending = await this.api.list()
+    if (!isActive()) return []
     this.store.savePendingApprovals(pending)
     if (pending.length === 0) {
       this.store.saveConversation(null)
@@ -155,6 +160,7 @@ export class ApprovalManager {
         pending,
         this.modelConfidenceThreshold,
       )
+      if (!isActive()) return []
       if (selected.decision !== "clarify") {
         intent = { ...selected, decision: localDecision }
       }
@@ -190,6 +196,7 @@ export class ApprovalManager {
     }
 
     const latest = await this.api.list()
+    if (!isActive()) return []
     if (versionOf(latest) !== currentVersion) {
       this.store.savePendingApprovals(latest)
       return [
@@ -204,6 +211,7 @@ export class ApprovalManager {
 
     const results: string[] = []
     for (const requestID of intent.requestIDs) {
+      if (!isActive()) return []
       const approval = latest.find((item) => item.requestID === requestID)
       if (!approval) {
         results.push(`${requestID}: 已失效`)
@@ -211,13 +219,16 @@ export class ApprovalManager {
       }
       try {
         const applied = await this.api.reply(requestID, intent.decision)
+        if (!isActive()) return []
         results.push(`#${approval.code}: ${applied ? label(intent.decision) : "未应用"}`)
       } catch (error) {
         results.push(`#${approval.code}: 失败（${firstLine(error)}）`)
       }
     }
 
+    if (!isActive()) return []
     const remaining = await this.api.list()
+    if (!isActive()) return []
     this.store.savePendingApprovals(remaining)
     this.store.saveConversation(null)
     return [
@@ -230,16 +241,25 @@ export class ApprovalManager {
     ]
   }
 
-  async expire(now = this.now()): Promise<NotificationEnvelope[]> {
+  async expire(
+    now = this.now(),
+    isActive: () => boolean = alwaysActive,
+  ): Promise<NotificationEnvelope[]> {
     const current = await this.api.list()
+    if (!isActive()) return []
     const expired = current.filter((item) => item.expiresAt <= now)
     const results: string[] = []
     for (const item of expired) {
+      if (!isActive()) return []
       try {
-        if (await this.api.reply(item.requestID, "reject")) results.push(`#${item.code}`)
+        const applied = await this.api.reply(item.requestID, "reject")
+        if (!isActive()) return []
+        if (applied) results.push(`#${item.code}`)
       } catch {}
     }
+    if (!isActive()) return []
     const remaining = await this.api.list()
+    if (!isActive()) return []
     this.store.savePendingApprovals(remaining)
     if (results.length === 0) return []
     return [
@@ -267,6 +287,10 @@ export class ApprovalManager {
     this.store.enqueueNotification(notification)
     return notification
   }
+}
+
+function alwaysActive(): boolean {
+  return true
 }
 
 function versionOf(pending: PendingApproval[]): string {

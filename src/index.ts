@@ -19,11 +19,14 @@ interface RuntimeGateway {
 }
 
 interface RuntimeApprovalManager {
-  reconcile(): Promise<NotificationEnvelope[]>
+  reconcile(isActive?: () => boolean): Promise<NotificationEnvelope[]>
   onPermissionAsked(event: PermissionAskedLike): Promise<NotificationEnvelope[]>
   onPermissionReplied(event: PermissionRepliedLike): Promise<void>
-  onMessage(message: InboundApprovalMessage): Promise<NotificationEnvelope[]>
-  expire?(): Promise<NotificationEnvelope[]>
+  onMessage(
+    message: InboundApprovalMessage,
+    isActive?: () => boolean,
+  ): Promise<NotificationEnvelope[]>
+  expire?(now?: number, isActive?: () => boolean): Promise<NotificationEnvelope[]>
 }
 
 interface RuntimeSessionNotifier {
@@ -109,6 +112,7 @@ export function createPluginRuntime(dependencies: {
 
   const deliver = async (notifications: NotificationEnvelope[]): Promise<void> => {
     for (const notification of notifications) {
+      if (!active) return
       try {
         await gateway.send(notification)
       } catch (error) {
@@ -158,14 +162,15 @@ export function createPluginRuntime(dependencies: {
       }
 
       gateway.start(async (message) => {
-        await deliver(await approvalManager.onMessage(message))
+        if (!active) return
+        await deliver(await approvalManager.onMessage(message, () => active))
       })
       active = true
       startupTimer = timers.setTimeout(() => {
         startupTimer = null
         if (!active) return
         void approvalManager
-          .reconcile()
+          .reconcile(() => active)
           .then(deliver)
           .catch((error) =>
             console.error(`[wechat] OpenCode 授权状态同步失败: ${firstLine(error)}`),
@@ -175,7 +180,7 @@ export function createPluginRuntime(dependencies: {
       if (approvalManager.expire) {
         expiryTimer = timers.setInterval(() => {
           void approvalManager
-            .expire?.()
+            .expire?.(undefined, () => active)
             .then(deliver)
             .catch((error) =>
               console.error(`[wechat] 授权超时检查失败: ${firstLine(error)}`),
