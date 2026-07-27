@@ -41,6 +41,7 @@ export function patchOpenCodeConfig(source: string, patch: ConfigPatch): string 
 }
 
 export async function install(options: InstallOptions): Promise<void> {
+  options.store.migrateLegacyState()
   const model = options.configuredModel
   if (!model || !options.availableModels.includes(model)) {
     throw new Error(`模型不可用: ${model || "未配置"}`)

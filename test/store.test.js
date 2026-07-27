@@ -34,7 +34,9 @@ test("writes credential files with owner-only permissions", () => {
   const { root, store } = temporaryStore()
   store.saveAccount(account)
 
-  assert.equal(statSync(join(root, "account.json")).mode & 0o777, 0o600)
+  if (process.platform !== "win32") {
+    assert.equal(statSync(join(root, "account.json")).mode & 0o777, 0o600)
+  }
   assert.deepEqual(JSON.parse(readFileSync(join(root, "account.json"), "utf8")), account)
 })
 

@@ -110,3 +110,32 @@ test("rejects unavailable models and incomplete binding", async () => {
     /绑定消息/,
   )
 })
+
+test("migrates a legacy binding before doctor checks the installation", async () => {
+  const root = mkdtempSync(join(tmpdir(), "wechat-installer-migration-"))
+  const stateDirectory = join(root, "state")
+  const configFile = join(root, "opencode.jsonc")
+  writeFileSync(configFile, "{}\n")
+  const store = new WeChatStore(stateDirectory)
+  store.saveAccount({
+    token: "secret",
+    baseUrl: "https://example.invalid",
+    accountId: "bot",
+    userId: "owner",
+    savedAt: "2026-07-27T00:00:00.000Z",
+  })
+  writeFileSync(join(stateDirectory, "context.json"), '{"owner":"legacy-context"}')
+  const reloaded = new WeChatStore(stateDirectory)
+
+  await install({
+    configFile,
+    store: reloaded,
+    availableModels: ["opencode-go/qwen3.7-max"],
+    configuredModel: "opencode-go/qwen3.7-max",
+    confirmModel: async () => true,
+    bind: async () => {},
+    sendTest: async () => true,
+  })
+
+  assert.equal(JSON.parse(readFileSync(join(stateDirectory, "context-v1.json"))).boundUserID, "owner")
+})

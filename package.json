@@ -2,6 +2,9 @@
   "name": "opencode-wechat-approve-plugin",
   "version": "1.0.0",
   "description": "OpenCode WeChat notifications and remote permission approvals via the ilink API",
+  "engines": {
+    "node": ">=20"
+  },
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -19,7 +22,7 @@
     "README.md"
   ],
   "scripts": {
-    "build": "tsc",
+    "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc",
     "dev": "tsc --watch",
     "test": "npm run build && node --test test/*.test.js"
   },

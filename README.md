@@ -1,181 +1,191 @@
-# OpenCode WeChat Approve Plugin
+# OpenCode WeChat Approve
 
-通过微信接收 OpenCode 任务通知，并远程批准或拒绝权限请求。插件基于微信 ilink API，同时支持把微信消息桥接到 OpenCode 会话。
+通过微信接收一个中心 OpenCode 服务中所有会话的完成、失败、取消和权限审批通知。
+
+V1 是通知与审批插件，不是聊天机器人：普通微信消息不会创建、继续或提示任何 OpenCode 会话。
 
 ## 功能
 
-- AI 任务完成或出错时发送微信通知
-- OpenCode 请求权限时发送微信审批消息
-- 在微信回复 `C1 yes`、`C1 no` 或 `C1 always` 完成审批
-- 接收微信消息并注入指定的 OpenCode 会话
-- 支持文本和图片回复
-- 自动恢复最近的微信通知目标，重启后无需再次激活
-- 登录凭据仅保存在本机 `~/.opencode/wechat-approve/`
+- 会话真实完成后发送一次通知，包含标题、Session ID 和项目目录
+- 执行失败时发送精简错误，随后到达的 idle 事件不会再发送 Done
+- 用户取消任务时显示为 Cancelled，不误报为失败或完成
+- 将 OpenCode 权限请求发送到扫码绑定的微信用户
+- 支持 `好的`、`OK`、`始终允许`、`全部授权`、`拒绝` 等自然回复
+- 同时存在多个待审批时，通过编号、项目、操作或“两个都”等语言二次确认
+- 使用安装时确认的模型辅助解释复杂审批回复；模型不能调用工具或直接授权
+- outbox、轮询游标、去重记录、待审批和会话状态均可在重启后恢复
+- 支持 Windows、macOS 和 Linux
 
-## 状态图片表情
+## 运行结构
 
-状态通知使用微信支持的 Unicode Emoji。微信客户端会使用自己的图片样式渲染这些字符；不会依赖 `[庆祝]` 之类仅在输入框中生效的快捷码。
+V1 使用一个固定的中心服务：
 
-| 状态 | 微信图片表情快捷码 |
-| --- | --- |
-| 任务完成 | `🎉` |
-| 执行错误 | `😞` |
-| 等待审批 | `👀` |
-| 已批准 | `👍` |
-| 已拒绝 | `👎` |
-| 审批超时 | `⏰` |
-| 警告 | `⚠️` |
-| 帮助 | `💡` |
-
-## 要求
-
-- OpenCode 1.x
-- Node.js 20 或更高版本
-- 支持 ilink/ClawBot 的微信版本
-
-## 安装
-
-将仓库克隆为 `.opencode/plugins/` 的直接子目录：
-
-```bash
-git clone https://github.com/weikunzl/opencode-wechat-approve-plugin \
-  .opencode/plugins/opencode-wechat-approve-plugin
-
-cd .opencode/plugins/opencode-wechat-approve-plugin
-npm install
-npm test
+```text
+opencode web / serve 127.0.0.1:4096
+├── project A sessions
+├── project B sessions
+└── project C sessions
 ```
 
-OpenCode 会自动发现该目录中的插件包，无需在 `opencode.json` 中重复声明。
-
-如果使用其他安装位置，可以在项目的 `opencode.json` 中显式指定构建入口：
-
-```json
-{
-  "$schema": "https://opencode.ai/config.json",
-  "plugin": ["./path/to/opencode-wechat-approve-plugin/dist/index.js"]
-}
-```
-
-## 首次登录
-
-在项目目录启动 OpenCode：
-
-```bash
-opencode
-```
-
-或：
+只启动一次：
 
 ```bash
 opencode web
 ```
 
-首次启动时，运行 OpenCode 的终端会显示微信二维码和扫码链接。扫码并在微信确认后，凭据会保存到：
+其他终端连接同一个服务：
 
-```text
-~/.opencode/wechat-approve/account.json
+```bash
+opencode attach http://127.0.0.1:4096 --dir /absolute/path/to/project
 ```
 
-`opencode web` 的浏览器页面不会显示二维码，请查看启动它的终端。
+Windows PowerShell：
 
-## 启用权限审批
-
-只有配置为 `ask` 的操作才会触发微信审批。例如：
-
-```json
-{
-  "$schema": "https://opencode.ai/config.json",
-  "permission": {
-    "bash": "ask",
-    "edit": "ask",
-    "external_directory": "ask"
-  }
-}
+```powershell
+opencode attach http://127.0.0.1:4096 --dir C:\workspace\project
 ```
 
-先在微信给机器人发送一条消息以建立回复上下文。之后收到权限请求时，微信会显示：
+不要为每个项目单独执行 `opencode web`。独立服务拥有独立事件流，无法由一个插件实例天然合并。
 
-```text
-[Approval Required #C1]
-Tool: bash
-Action: Run command
-Args: npm test
+## 安装
 
-Reply "C1 yes" to approve
-Reply "C1 no" to deny
+要求：
+
+- Node.js 20 或更高版本
+- OpenCode 1.x，且支持 `plugin`、`web` 和 `attach`
+- 支持 iLink Bot 的微信账号
+
+执行：
+
+```bash
+npx opencode-wechat-approve-plugin install
 ```
 
-支持的回复：
+安装器会：
 
-- `C1 yes` 或 `C1 确认`：本次允许
-- `C1 no` 或 `C1 拒绝`：拒绝
-- `C1 always` 或 `C1 始终`：本次会话始终允许
-- `status`：查看待处理审批
-- `help`：显示微信命令
+1. 读取 OpenCode 的真实全局配置目录；
+2. 检查已安装模型并要求确认审批解释模型；
+3. 保留 JSONC 注释和其他插件配置；
+4. 写入中心服务默认地址 `127.0.0.1:4096`；
+5. 显示微信二维码；
+6. 扫码确认后等待用户向机器人发送固定文本 `绑定`；
+7. 发送测试通知，成功后才完成安装。
 
-审批请求超过 10 分钟未处理会自动拒绝。
+扫码绑定的是实际微信用户 ID 和 iLink `context_token`，产品不会硬编码联系人名称。
 
-## OpenCode 工具
+建议在启动中心服务前设置密码：
 
-插件注册以下工具：
-
-- `wechat_reply`：发送微信文本
-- `wechat_send_image`：发送微信图片
-- `wechat_notify`：主动发送通知
-- `wechat_permission_confirm`：主动请求微信确认
-- `wechat_new_session`：创建新的微信桥接会话
-
-## 会话绑定
-
-微信消息默认进入 `~/.opencode/wechat-approve/session.json` 中保存的 OpenCode 会话。可以把现有会话 ID 写入该文件：
-
-```json
-{
-  "sessionID": "ses_xxx"
-}
+```bash
+export OPENCODE_SERVER_PASSWORD='use-a-strong-password'
+opencode web
 ```
 
-也可以调用 `wechat_new_session` 创建新会话。
+PowerShell：
 
-## 本地数据
+```powershell
+$env:OPENCODE_SERVER_PASSWORD = 'use-a-strong-password'
+opencode web
+```
+
+## 审批回复
+
+单个待审批：
+
+| 回复示例 | OpenCode 决策 |
+| --- | --- |
+| `是`、`OK`、`好的`、`同意`、`允许`、`yes` | `once` |
+| `全部授权`、`始终允许`、`always`、`allow all` | `always` |
+| `no`、`拒绝`、`不同意`、`取消` | `reject` |
+
+多个待审批：
+
+- `好的`：不立即授权，先询问具体是哪一个
+- `第一个`
+- `1 和 3`
+- `docs 项目的`
+- `npm test 那个`
+- `两个都允许`
+- `两个都始终允许`
+- `只拒绝 git push`
+
+执行前会重新读取 OpenCode 待审批列表。请求已在桌面端处理、已过期或集合发生变化时，不会把回复错误应用到旧请求。
+
+## 状态图片表情
+
+通知使用 Unicode Emoji，例如 `🎉`、`😞`、`👀`、`👍`。微信会把支持的 Emoji 字符渲染成自己的图片表情；`[庆祝]` 这类输入框快捷文字经 Bot API 发送时可能只显示为普通文本，因此插件不再发送快捷文字。参见 [微信表情列表与转换说明](https://www.emojiall.com/zh-hans/platform-wechat)。
+
+## 诊断与恢复
+
+```bash
+npx opencode-wechat-approve-plugin doctor
+```
+
+`doctor` 分别检查：
+
+- 全局插件配置
+- 微信账号与绑定上下文
+- 已确认模型是否仍可用
+- `127.0.0.1:4096/global/health`
+
+补充或恢复绑定：
+
+```bash
+npx opencode-wechat-approve-plugin bind
+```
+
+常见问题：
+
+| 现象 | 处理 |
+| --- | --- |
+| `ServeError` 或端口变化 | 确认只启动一个 `opencode web`，检查 4096 是否被其他进程占用 |
+| `Model not found: opencode/...` | 运行 `doctor`，重新安装并选择 `opencode models` 中存在的完整 provider/model |
+| 能收到旧消息但收不到主动通知 | 运行 `bind`，向机器人发送一次固定文本 `绑定` |
+| 多项目重复通知 | 让其他终端使用 `opencode attach`；插件租约会禁用同一状态目录下的次实例 |
+| 微信回复“继续”没有反应 | 这是 V1 的预期行为；普通消息不会驱动 AI 会话 |
+
+## 本地状态
+
+所有插件状态均位于：
 
 ```text
 ~/.opencode/wechat-approve/
-├── account.json     # 微信登录凭据，权限为 600
-├── config.json      # 可选插件配置
-├── session.json     # OpenCode 会话 ID
-├── context.json     # 微信回复上下文
-└── sync_buf.txt     # 消息同步状态
+├── account.json
+├── config.json
+├── context-v1.json
+├── cursor.json
+├── pending-approvals.json
+├── approval-conversation.json
+├── notification-outbox.json
+├── processed-messages.json
+├── runtime.json
+└── runtime-lease.json
 ```
 
-这些文件包含敏感信息，不应提交到 Git。
-
-如果会话可能残留不可用的模型，可通过 `config.json` 显式指定微信消息使用的模型：
-
-```json
-{
-  "model": "opencode-go/qwen3.7-max"
-}
-```
-
-插件转发微信消息和权限重试时会使用该模型，不再依赖会话最后一次使用的模型。
+凭据与上下文不会写入日志或微信通知。POSIX 系统使用 `0600` 文件权限；Windows 依赖当前用户配置目录的 ACL 隔离。
 
 ## 开发
 
 ```bash
-npm install
+npm ci
 npm test
-npm run dev
+npm run build
 ```
 
-## 安全说明
+测试在 Windows、macOS 和 Linux 上运行。
 
-远程审批会授权 OpenCode 在本机执行操作。请确保微信账号安全，仔细阅读通知中的工具、操作和参数，不要批准来源不明的请求。插件当前采用单用户、单通知目标模式。
+## 安全边界
+
+- 默认只连接回环地址
+- 只接受扫码绑定用户的一对一消息
+- 群聊和其他发送者被忽略
+- 模糊表达永不授权
+- `always` 只在用户明确表达持续授权时发送
+- 模型输出必须通过请求 ID、结构、置信度和授权范围校验
+- 普通微信消息不创建或推进 OpenCode 会话
 
 ## 致谢
 
-本项目基于 [Ikaros12643/opencode-wechat-plugin](https://github.com/Ikaros12643/opencode-wechat-plugin) 扩展，并参考了 [Johnixr/claude-code-wechat-channel](https://github.com/Johnixr/claude-code-wechat-channel) 的微信连接实现。
+项目基于 [Ikaros12643/opencode-wechat-plugin](https://github.com/Ikaros12643/opencode-wechat-plugin) 的 iLink 连接思路，并参考 [Johnixr/claude-code-wechat-channel](https://github.com/Johnixr/claude-code-wechat-channel)。
 
 ## License
 
