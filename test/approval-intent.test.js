@@ -75,6 +75,31 @@ test("never grants negated or questioning Chinese phrases", () => {
   assert.equal(interpretDeterministic("这个能通过吗", pending), null)
 })
 
+test("never grants approval tokens under Chinese negative modality", () => {
+  const pending = [approval("r1", 1)]
+
+  for (const text of [
+    "不能允许",
+    "无法同意",
+    "先别允许",
+    "禁止通过",
+    "未确认",
+    "暂时不授权",
+    "不要执行，稍后确认",
+  ]) {
+    assert.notEqual(
+      interpretDeterministic(text, pending)?.decision,
+      "once",
+      text,
+    )
+    assert.notEqual(
+      interpretDeterministic(text, pending)?.decision,
+      "always",
+      text,
+    )
+  }
+})
+
 test("inherits the decision during a clarification conversation", () => {
   const pending = [approval("r1", 1), approval("r2", 2)]
   const conversation = {

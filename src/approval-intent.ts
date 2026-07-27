@@ -4,6 +4,10 @@ import type { ApprovalIntent } from "./model-interpreter.js"
 
 const REJECT =
   /(?:^|[^a-z])(no|deny|reject)(?:$|[^a-z])|拒绝|不同意|不允许|不可以|不通过|不确认|不要|别执行|取消/
+const NEGATED_APPROVAL =
+  /(?:不能|不可|不准|无法|禁止|别|勿|未|没|不要|莫|暂缓|暂停|停止).{0,6}(?:确认|同意|允许|通过|授权|执行)|(?:do\s+not|don't|cannot|can't|never)\s+(?:allow|approve|confirm|execute)/
+const NEGATIVE_MODALITY =
+  /(?:不|别|勿|未|没|无|禁止|拒绝|取消|否|停止|暂停|暂缓|不能|不可|不准|甭|莫)|(?:^|[^a-z])(?:not|never|cannot|can't|don't|without)(?:$|[^a-z])/
 const ALWAYS = /allow\s*all|always|始终允许|永久允许|以后都允许|全部授权|全部始终|都始终允许/
 const ONCE = /(?:^|[^a-z])(ok|okay|yes|y|allow|approve)(?:$|[^a-z])|好的|好啊|可以|是的|确认|同意|允许|通过/
 
@@ -32,6 +36,8 @@ export function parseApprovalDecision(text: string): "once" | "always" | "reject
   if (/[?？]/.test(source) || /(?:可以|确认|通过|允许|同意)吗(?:\s|$)/.test(source)) return null
   text = normalize(text)
   if (REJECT.test(text)) return "reject"
+  if (NEGATED_APPROVAL.test(text)) return "reject"
+  if (NEGATIVE_MODALITY.test(text)) return null
   if (ALWAYS.test(text)) return "always"
   if (ONCE.test(text)) return "once"
   return null
