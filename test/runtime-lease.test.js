@@ -29,3 +29,15 @@ test("reclaims a stale lease without relying on flock", () => {
   assert.equal(lease.acquire(), true)
   lease.release()
 })
+
+test("reclaims a recent lease immediately when its process no longer exists", () => {
+  const root = mkdtempSync(join(tmpdir(), "wechat-runtime-lease-dead-pid-"))
+  writeFileSync(
+    join(root, "runtime-lease.json"),
+    JSON.stringify({ instanceID: "dead", pid: 999999, heartbeatAt: 99_999 }),
+  )
+  const lease = new RuntimeLease(root, { now: () => 100_000, staleAfterMs: 30_000 })
+
+  assert.equal(lease.acquire(), true)
+  lease.release()
+})

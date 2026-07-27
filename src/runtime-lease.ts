@@ -32,7 +32,12 @@ export class RuntimeLease {
     }
 
     const current = this.read()
-    if (!current || this.now() - current.heartbeatAt <= this.staleAfterMs) return false
+    if (
+      !current ||
+      (this.now() - current.heartbeatAt <= this.staleAfterMs && processExists(current.pid))
+    ) {
+      return false
+    }
     try {
       fs.unlinkSync(this.file)
     } catch {
@@ -101,5 +106,14 @@ export class RuntimeLease {
     } catch {
       return null
     }
+  }
+}
+
+function processExists(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EPERM"
   }
 }
