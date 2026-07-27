@@ -1,6 +1,7 @@
 export const WECHAT_STATUS_EMOTICONS = {
   done: "🎉",
   error: "😞",
+  cancelled: "🛑",
   approval: "👀",
   approved: "👍",
   rejected: "👎",

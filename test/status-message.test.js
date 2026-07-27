@@ -7,6 +7,7 @@ test("maps OpenCode states to WeChat image emoticon shortcuts", () => {
   assert.deepEqual(WECHAT_STATUS_EMOTICONS, {
     done: "🎉",
     error: "😞",
+    cancelled: "🛑",
     approval: "👀",
     approved: "👍",
     rejected: "👎",
