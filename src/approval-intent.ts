@@ -2,7 +2,8 @@ import path from "node:path"
 import type { ApprovalConversation, PendingApproval } from "./domain.js"
 import type { ApprovalIntent } from "./model-interpreter.js"
 
-const REJECT = /(?:^|[^a-z])(no|deny|reject)(?:$|[^a-z])|拒绝|不同意|不允许|不要|别执行|取消/
+const REJECT =
+  /(?:^|[^a-z])(no|deny|reject)(?:$|[^a-z])|拒绝|不同意|不允许|不可以|不通过|不确认|不要|别执行|取消/
 const ALWAYS = /allow\s*all|always|始终允许|永久允许|以后都允许|全部授权|全部始终|都始终允许/
 const ONCE = /(?:^|[^a-z])(ok|okay|yes|y|allow|approve)(?:$|[^a-z])|好的|好啊|可以|是的|确认|同意|允许|通过/
 
@@ -27,6 +28,8 @@ export function interpretDeterministic(
 }
 
 export function parseApprovalDecision(text: string): "once" | "always" | "reject" | null {
+  const source = text.normalize("NFKC").trim().toLowerCase()
+  if (/[?？]/.test(source) || /(?:可以|确认|通过|允许|同意)吗(?:\s|$)/.test(source)) return null
   text = normalize(text)
   if (REJECT.test(text)) return "reject"
   if (ALWAYS.test(text)) return "always"

@@ -65,6 +65,16 @@ test("returns null for ordinary text that is not an approval reply", () => {
   assert.equal(interpretDeterministic("今天天气怎么样", [approval("r1", 1)]), null)
 })
 
+test("never grants negated or questioning Chinese phrases", () => {
+  const pending = [approval("r1", 1)]
+
+  assert.equal(interpretDeterministic("不可以", pending).decision, "reject")
+  assert.equal(interpretDeterministic("不通过", pending).decision, "reject")
+  assert.equal(interpretDeterministic("不确认", pending).decision, "reject")
+  assert.equal(interpretDeterministic("可以吗？", pending), null)
+  assert.equal(interpretDeterministic("这个能通过吗", pending), null)
+})
+
 test("inherits the decision during a clarification conversation", () => {
   const pending = [approval("r1", 1), approval("r2", 2)]
   const conversation = {
