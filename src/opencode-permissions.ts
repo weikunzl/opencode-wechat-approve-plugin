@@ -17,6 +17,15 @@ interface PermissionResponse {
   pattern?: string | string[]
   metadata?: Record<string, unknown>
   time?: { created?: number }
+  tool?: { messageID?: string }
+}
+
+interface SessionMessageResponse {
+  info?: { time?: { created?: number } }
+  parts?: Array<{
+    time?: { start?: number }
+    state?: { time?: { start?: number } }
+  }>
 }
 
 export class HttpPermissionAPI implements PermissionAPI {
@@ -39,11 +48,11 @@ export class HttpPermissionAPI implements PermissionAPI {
     const existing = new Map(this.store.loadPendingApprovals().map((item) => [item.requestID, item]))
     let nextCode = Math.max(0, ...Array.from(existing.values(), (item) => item.code)) + 1
 
-    return raw.flatMap((item) => {
+    const mapped = await Promise.all(raw.map(async (item) => {
       const requestID = item.id ?? item.requestID
       if (!requestID || !item.sessionID) return []
       const saved = existing.get(requestID)
-      const createdAt = item.time?.created ?? saved?.createdAt ?? Date.now()
+      const createdAt = item.time?.created ?? (await this.requestCreatedAt(item)) ?? saved?.createdAt ?? Date.now()
       const pattern = item.patterns ?? (Array.isArray(item.pattern) ? item.pattern : item.pattern ? [item.pattern] : [])
       const project =
         stringMetadata(item.metadata, "directory") ??
@@ -63,7 +72,8 @@ export class HttpPermissionAPI implements PermissionAPI {
           expiresAt: saved?.expiresAt ?? createdAt + this.timeoutMs,
         },
       ]
-    })
+    }))
+    return mapped.flat()
   }
 
   async reply(requestID: string, decision: "once" | "always" | "reject"): Promise<boolean> {
@@ -76,6 +86,33 @@ export class HttpPermissionAPI implements PermissionAPI {
     if (!response.ok) throw new Error(`OpenCode permission reply failed: HTTP ${response.status}`)
     const body = await response.json().catch(() => true)
     return body !== false
+  }
+
+  private async requestCreatedAt(item: PermissionResponse): Promise<number | null> {
+    const messageID = item.tool?.messageID
+    if (!messageID || !item.sessionID) return null
+    try {
+      const response = await this.fetcher(
+        new URL(
+          `/session/${encodeURIComponent(item.sessionID)}/message/${encodeURIComponent(messageID)}`,
+          this.serverURL,
+        ),
+        {
+          headers: openCodeHeaders(undefined, this.authorization),
+          signal: AbortSignal.timeout(10_000),
+        },
+      )
+      if (!response.ok) return null
+      const body = (await response.json()) as SessionMessageResponse
+      const starts = (body.parts ?? [])
+        .map((part) => part.state?.time?.start ?? part.time?.start)
+        .filter((value): value is number => typeof value === "number" && Number.isFinite(value))
+      if (starts.length > 0) return Math.min(...starts)
+      const created = body.info?.time?.created
+      return typeof created === "number" && Number.isFinite(created) ? created : null
+    } catch {
+      return null
+    }
   }
 }
 
