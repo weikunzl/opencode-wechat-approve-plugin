@@ -100,7 +100,7 @@ export class ApprovalManager {
           `Session: ${approval.sessionID}`,
           `Permission: ${approval.permission}`,
           approval.patterns.length ? `Action: ${approval.patterns.join(", ").slice(0, 400)}` : "",
-          "请回复“好的”“全部允许”“始终允许”或“拒绝”。",
+          "请回复“好的”(本次)、“全部允许”(全部本次)、“全部始终允许”(全部持久)或“拒绝”。",
         ]
           .filter(Boolean)
           .join("\n"),
@@ -248,7 +248,7 @@ export class ApprovalManager {
           `approval-follow-up:${message.messageID}`,
           "approval",
           "approval",
-          `[Approval pending]\n还有 ${remaining.length} 个待审批请求，请继续回复处理方式。\n${formatPending(remaining)}\n可回复“全部允许”“全部始终允许”“全部拒绝”，或指定“第一个允许”等。`,
+          `[Approval pending]\n还有 ${remaining.length} 个待审批请求，请继续回复处理方式。\n${formatPending(remaining)}\n可回复“全部允许”(本次)、“全部始终允许”(持久)、“全部拒绝”，或指定“第一个允许”等。`,
         ),
       )
     }

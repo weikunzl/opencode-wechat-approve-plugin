@@ -64,7 +64,7 @@ test("routes once always and reject by OpenCode request ID", async () => {
 
 test("applies all-request decisions for Chinese and English all forms", async () => {
   for (const [text, decision] of [
-    ["全部允许", "always"],
+    ["全部允许", "once"],
     ["全部始终允许", "always"],
     ["全部always", "always"],
     ["全部拒绝", "reject"],

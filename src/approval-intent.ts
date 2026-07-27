@@ -9,9 +9,9 @@ const NEGATED_APPROVAL =
 const NEGATIVE_MODALITY =
   /(?:不|别|勿|未|没|无|禁止|拒绝|取消|否|停止|暂停|暂缓|不能|不可|不准|甭|莫)|(?:^|[^a-z])(?:not|never|cannot|can't|don't|without)(?:$|[^a-z])/
 const ALWAYS =
-  /allow\s*all|always|始终允许|永久允许|以后都允许|全部授权|全部允许|全部都允许|全部始终|都始终允许|始终放行|永久放行/
+  /always|始终允许|永久允许|以后都允许|全部授权|全部始终|都始终允许|始终放行|永久放行/
 const ONCE =
-  /(?:^|[^a-z])(ok|okay|yes|y|allow|approve)(?:$|[^a-z])|好的|好啊|可以|是的|确认|同意|允许|通过|批准|放行/
+  /allow\s*all|all\s+(?:allow|approve)|(?:全部|所有|全都)(?:都)?(?:允许|同意|通过|批准|放行)|(?:^|[^a-z])(ok|okay|yes|y|allow|approve)(?:$|[^a-z])|好的|好啊|可以|是的|确认|同意|允许|通过|批准|放行/
 const ASSIGNMENT_SELECTOR = /第(?:[一二三四五六七八九十百]+|\d+)个|#?\d+/
 
 export function interpretDeterministic(
