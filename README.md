@@ -143,12 +143,23 @@ Reply "C1 no" to deny
 ```text
 ~/.opencode/wechat-approve/
 ├── account.json     # 微信登录凭据，权限为 600
+├── config.json      # 可选插件配置
 ├── session.json     # OpenCode 会话 ID
 ├── context.json     # 微信回复上下文
 └── sync_buf.txt     # 消息同步状态
 ```
 
 这些文件包含敏感信息，不应提交到 Git。
+
+如果会话可能残留不可用的模型，可通过 `config.json` 显式指定微信消息使用的模型：
+
+```json
+{
+  "model": "opencode-go/qwen3.7-max"
+}
+```
+
+插件转发微信消息和权限重试时会使用该模型，不再依赖会话最后一次使用的模型。
 
 ## 开发
 

@@ -55,6 +55,17 @@ export class WeChatStore {
     } catch {}
   }
 
+  getPromptModel(): string | null {
+    try {
+      const file = path.join(this.dir, "config.json")
+      if (!fs.existsSync(file)) return null
+      const data = JSON.parse(fs.readFileSync(file, "utf-8"))
+      return typeof data.model === "string" ? data.model : null
+    } catch {
+      return null
+    }
+  }
+
   cacheContext(senderId: string, token: string): void {
     const key = senderId
     this.ctxTokens.set(key, token)
