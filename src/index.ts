@@ -5,6 +5,7 @@ import { WeChatClient } from "./client.js"
 import { WeChatStore } from "./store.js"
 import { formatStatusMessage } from "./status-message.js"
 import { formatError, SessionNotificationState } from "./notification-utils.js"
+import { buildPromptBody } from "./prompt-model.js"
 
 interface PendingPermission {
   permission: Permission
@@ -123,14 +124,10 @@ export const WeChatPlugin: Plugin = async (input) => {
           if (sessionID) {
             await client.session.promptAsync({
               path: { id: sessionID },
-              body: {
-                parts: [
-                  {
-                    type: "text",
-                    text: `[System] Permission #${cmd.code} approved via WeChat. Retry the previously denied operation.`,
-                  },
-                ],
-              },
+              body: buildPromptBody(
+                `[System] Permission #${cmd.code} approved via WeChat. Retry the previously denied operation.`,
+                store.getPromptModel(),
+              ),
             })
           }
         } catch (err) {
@@ -184,7 +181,7 @@ export const WeChatPlugin: Plugin = async (input) => {
 
       await client.session.promptAsync({
         path: { id: sessionID },
-        body: { parts: [{ type: "text", text: prompt }] },
+        body: buildPromptBody(prompt, store.getPromptModel()),
       })
 
       console.log(`[wechat] message injected -> session ${sessionID}`)
