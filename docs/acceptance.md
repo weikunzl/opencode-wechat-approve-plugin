@@ -27,7 +27,7 @@ acceptance machine. Before every read or send, the driver must verify that the
 visible WeChat conversation title is exactly `微信ClawBot`. It must stop on any
 mismatch and must not inspect or interact with another conversation.
 
-1. Run `npx github:weikunzl/opencode-wechat-approve-plugin install`.
+1. Run `npx @wekux/opencode-wechat-approve-plugin install`.
 2. Confirm an available provider/model.
 3. Scan the QR code, send `绑定`, and receive the test notification.
 4. Start `opencode web` and confirm `doctor` is fully green.

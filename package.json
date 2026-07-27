@@ -1,5 +1,5 @@
 {
-  "name": "opencode-wechat-approve-plugin",
+  "name": "@wekux/opencode-wechat-approve-plugin",
   "version": "1.0.0",
   "description": "OpenCode WeChat notifications and remote permission approvals via the ilink API",
   "engines": {
@@ -9,7 +9,7 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "bin": {
-    "wechat-approve": "./dist/bin.js"
+    "wechat-approve": "dist/bin.js"
   },
   "exports": {
     ".": {
@@ -58,6 +58,6 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/weikunzl/opencode-wechat-approve-plugin.git"
+    "url": "git+https://github.com/weikunzl/opencode-wechat-approve-plugin.git"
   }
 }

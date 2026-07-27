@@ -63,7 +63,7 @@ opencode attach http://127.0.0.1:4096 --dir C:\workspace\project
 执行：
 
 ```bash
-npx github:weikunzl/opencode-wechat-approve-plugin install
+npx @wekux/opencode-wechat-approve-plugin install
 ```
 
 安装器会：
@@ -120,7 +120,7 @@ opencode web
 ## 诊断与恢复
 
 ```bash
-npx github:weikunzl/opencode-wechat-approve-plugin doctor
+npx @wekux/opencode-wechat-approve-plugin doctor
 ```
 
 `doctor` 分别检查：
@@ -133,7 +133,7 @@ npx github:weikunzl/opencode-wechat-approve-plugin doctor
 补充或恢复绑定：
 
 ```bash
-npx github:weikunzl/opencode-wechat-approve-plugin bind
+npx @wekux/opencode-wechat-approve-plugin bind
 ```
 
 常见问题：
