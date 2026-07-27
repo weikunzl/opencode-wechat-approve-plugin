@@ -65,7 +65,7 @@ export class IlinkClientTransport implements IlinkTransport {
     throw new Error("微信二维码登录超时")
   }
 
-  async poll(cursor: string): Promise<GetUpdatesResponse> {
+  async poll(cursor: string, signal?: AbortSignal): Promise<GetUpdatesResponse> {
     try {
       return (await this.apiCall(
         "ilink/bot/getupdates",
@@ -74,6 +74,7 @@ export class IlinkClientTransport implements IlinkTransport {
           base_info: { channel_version: "1.0.0" },
         },
         LONG_POLL_TIMEOUT_MS,
+        signal,
       )) as GetUpdatesResponse
     } catch (error) {
       if (isTimeout(error)) return { ret: 0, msgs: [], get_updates_buf: cursor }
@@ -105,7 +106,12 @@ export class IlinkClientTransport implements IlinkTransport {
     })
   }
 
-  private async apiCall(endpoint: string, body: object, timeoutMs = 15_000): Promise<unknown> {
+  private async apiCall(
+    endpoint: string,
+    body: object,
+    timeoutMs = 15_000,
+    signal?: AbortSignal,
+  ): Promise<unknown> {
     const storedAccount = this.store.loadAccount()
     if (
       this.pendingLoginAccount &&
@@ -127,7 +133,9 @@ export class IlinkClientTransport implements IlinkTransport {
         "X-WECHAT-UIN": randomWechatUin(),
       },
       body: bodyText,
-      signal: AbortSignal.timeout(timeoutMs),
+      signal: signal
+        ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)])
+        : AbortSignal.timeout(timeoutMs),
     })
     const text = await response.text()
     if (!response.ok) throw new Error(`微信 API 请求失败: HTTP ${response.status}`)

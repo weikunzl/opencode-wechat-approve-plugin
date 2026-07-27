@@ -14,12 +14,14 @@ export interface InboundApprovalMessage {
 
 export interface IlinkTransport {
   login(onQRCode?: (value: string) => void, force?: boolean): Promise<AccountData>
-  poll(cursor: string): Promise<GetUpdatesResponse>
+  poll(cursor: string, signal?: AbortSignal): Promise<GetUpdatesResponse>
   sendText(to: string, text: string, contextToken: string, idempotencyKey: string): Promise<void>
 }
 
 export class WeChatGateway {
   private running = false
+  private pollController: AbortController | null = null
+  private pollLoopPromise: Promise<void> | null = null
   private seen: Set<string>
 
   constructor(
@@ -78,18 +80,25 @@ export class WeChatGateway {
   start(onMessage: (message: InboundApprovalMessage) => Promise<void>): void {
     if (this.running) return
     this.running = true
-    void this.pollLoop(onMessage)
+    this.pollController = new AbortController()
+    this.pollLoopPromise = this.pollLoop(onMessage, this.pollController.signal)
   }
 
   async stop(): Promise<void> {
     this.running = false
+    this.pollController?.abort()
+    await this.pollLoopPromise
+    this.pollController = null
+    this.pollLoopPromise = null
   }
 
   async pollOnce(
     onMessage: (message: InboundApprovalMessage) => Promise<void>,
     binding = false,
+    signal?: AbortSignal,
   ): Promise<void> {
-    const response = await this.transport.poll(this.store.loadCursor())
+    const response = await this.transport.poll(this.store.loadCursor(), signal)
+    if (signal?.aborted) return
     if (response.ret !== undefined && response.ret !== 0) {
       throw new Error(`微信轮询失败: ${response.errmsg || response.ret}`)
     }
@@ -122,9 +131,10 @@ export class WeChatGateway {
         })
       }
 
+      if (signal?.aborted) return
       await onMessage(parsed.message)
     }
-    if (!binding && this.store.loadOutbox().length > 0) {
+    if (!signal?.aborted && !binding && this.store.loadOutbox().length > 0) {
       await this.flushOutbox()
     }
   }
@@ -153,17 +163,21 @@ export class WeChatGateway {
     }
   }
 
-  private async pollLoop(onMessage: (message: InboundApprovalMessage) => Promise<void>): Promise<void> {
+  private async pollLoop(
+    onMessage: (message: InboundApprovalMessage) => Promise<void>,
+    signal: AbortSignal,
+  ): Promise<void> {
     let failures = 0
-    while (this.running) {
+    while (this.running && !signal.aborted) {
       try {
-        await this.pollOnce(onMessage)
+        await this.pollOnce(onMessage, false, signal)
         failures = 0
       } catch (error) {
+        if (signal.aborted) return
         failures++
         const delay = Math.min(30_000, 500 * 2 ** Math.min(failures, 6)) + Math.floor(Math.random() * 250)
         console.error(`[wechat] 轮询异常: ${redact(error)}`)
-        await sleep(delay)
+        await sleep(delay, signal)
       }
     }
   }
@@ -208,6 +222,17 @@ function redact(error: unknown): string {
     .replace(/context[_-]?token["'=:\s]+[^\s,}]+/gi, "context_token=[REDACTED]")
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms))
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) return Promise.resolve()
+  return new Promise((resolve) => {
+    const timer = setTimeout(resolve, ms)
+    signal?.addEventListener(
+      "abort",
+      () => {
+        clearTimeout(timer)
+        resolve()
+      },
+      { once: true },
+    )
+  })
 }

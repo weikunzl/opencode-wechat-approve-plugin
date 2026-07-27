@@ -169,6 +169,39 @@ test("retries the durable outbox while the gateway remains running", async () =>
   assert.deepEqual(store.loadOutbox(), [])
 })
 
+test("stop waits for an in-flight poll and never dispatches its response", async () => {
+  const { store } = harness()
+  let finishPoll
+  let receivedSignal
+  const messages = []
+  const gateway = new WeChatGateway(store, {
+    login: async () => {
+      throw new Error("not expected")
+    },
+    poll: async (_cursor, signal) => {
+      receivedSignal = signal
+      return new Promise((resolve) => {
+        finishPoll = resolve
+      })
+    },
+    sendText: async () => {},
+  })
+  gateway.start(async (message) => messages.push(message))
+  await new Promise((resolve) => setImmediate(resolve))
+
+  const stopping = gateway.stop()
+  assert.equal(receivedSignal.aborted, true)
+  finishPoll({
+    ret: 0,
+    get_updates_buf: "stale-cursor",
+    msgs: [privateText({ senderID: "owner@im.wechat", text: "好的", id: "stale-message" })],
+  })
+  await stopping
+
+  assert.deepEqual(messages, [])
+  assert.notEqual(store.loadCursor(), "stale-cursor")
+})
+
 test("redacts credentials and bounds every outbound WeChat notification", async () => {
   const { gateway, sent } = harness()
 
