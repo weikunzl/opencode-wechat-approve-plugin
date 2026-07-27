@@ -1,10 +1,11 @@
 import assert from "node:assert/strict"
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import test from "node:test"
+import { fileURLToPath } from "node:url"
 
-import { install, patchOpenCodeConfig } from "../dist/install.js"
+import { install, patchOpenCodeConfig, stageLocalPlugin } from "../dist/install.js"
 import { WeChatStore } from "../dist/store.js"
 
 test("preserves JSONC comments and unrelated settings while installing idempotently", () => {
@@ -138,4 +139,31 @@ test("migrates a legacy binding before doctor checks the installation", async ()
   })
 
   assert.equal(JSON.parse(readFileSync(join(stateDirectory, "context-v1.json"))).boundUserID, "owner")
+})
+
+test("stages a self-contained global plugin entry from a GitHub installation", () => {
+  const root = mkdtempSync(join(tmpdir(), "wechat-local-plugin-"))
+  const sourceRoot = join(root, "source")
+  const configDirectory = join(root, "OpenCode Config With Spaces")
+  mkdirSync(join(sourceRoot, "dist"), { recursive: true })
+  writeFileSync(join(sourceRoot, "dist", "index.js"), "export default async () => ({})\n")
+  writeFileSync(
+    join(sourceRoot, "package.json"),
+    JSON.stringify({ name: "opencode-wechat-approve-plugin", type: "module", main: "dist/index.js" }),
+  )
+
+  const spec = stageLocalPlugin(sourceRoot, configDirectory)
+
+  assert.match(spec, /^file:/)
+  assert.equal(
+    readFileSync(
+      join(configDirectory, "plugins", "opencode-wechat-approve-plugin", "dist", "index.js"),
+      "utf8",
+    ),
+    "export default async () => ({})\n",
+  )
+  assert.equal(
+    fileURLToPath(spec),
+    join(configDirectory, "plugins", "opencode-wechat-approve-plugin", "dist", "index.js"),
+  )
 })

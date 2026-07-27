@@ -23,6 +23,7 @@
   ],
   "scripts": {
     "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc",
+    "prepare": "npm run build",
     "dev": "tsc --watch",
     "test": "npm run build && node --test test/*.test.js"
   },

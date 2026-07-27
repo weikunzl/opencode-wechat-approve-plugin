@@ -4,12 +4,13 @@ import fs from "node:fs"
 import path from "node:path"
 import process from "node:process"
 import readline from "node:readline/promises"
+import { fileURLToPath } from "node:url"
 import spawn from "cross-spawn"
 import { parse } from "jsonc-parser"
 import qrcode from "qrcode-terminal"
 import { doctorInstallation, parseOpenCodePaths, resolveEffectiveModel } from "./cli.js"
 import { IlinkClientTransport } from "./client.js"
-import { install, PACKAGE_NAME } from "./install.js"
+import { install, PACKAGE_NAME, stageLocalPlugin } from "./install.js"
 import { WeChatStore } from "./store.js"
 import { WeChatGateway } from "./wechat-gateway.js"
 
@@ -53,6 +54,8 @@ async function main(args: string[]): Promise<number> {
   const resolvedConfig = parse(await runOpenCode(["debug", "config"]))
   const modelState = readJSON(path.join(paths.state, "model.json"))
   const proposed = resolveEffectiveModel(resolvedConfig, modelState)
+  const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
+  const pluginSpec = stageLocalPlugin(packageRoot, paths.config)
   const terminal = readline.createInterface({ input: process.stdin, output: process.stdout })
   try {
     const configuredModel =
@@ -71,6 +74,7 @@ async function main(args: string[]): Promise<number> {
       },
       bind: async () => bind(gateway),
       sendTest: async () => sendTest(gateway),
+      pluginName: pluginSpec,
     })
   } finally {
     terminal.close()

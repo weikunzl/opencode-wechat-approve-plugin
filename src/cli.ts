@@ -60,7 +60,10 @@ export async function doctorInstallation(options: {
     plugins.some(
       (item) =>
         typeof item === "string" &&
-        (item === PACKAGE_NAME || item.startsWith(`${PACKAGE_NAME}@`)),
+        (item === PACKAGE_NAME ||
+          item.startsWith(`${PACKAGE_NAME}@`) ||
+          (item.startsWith("file:") &&
+            item.includes(`/plugins/${PACKAGE_NAME}/dist/index.js`))),
     )
 
   const account = asRecord(readJSONC(path.join(options.stateDirectory, "account.json")))

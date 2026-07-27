@@ -1,10 +1,46 @@
 import fs from "node:fs"
 import path from "node:path"
+import { pathToFileURL } from "node:url"
 import { applyEdits, modify, parse } from "jsonc-parser"
 import { loadPluginConfig } from "./config.js"
 import { WeChatStore } from "./store.js"
 
 export const PACKAGE_NAME = "opencode-wechat-approve-plugin"
+
+export function stageLocalPlugin(sourceRoot: string, configDirectory: string): string {
+  const sourceDist = path.join(sourceRoot, "dist")
+  const sourcePackage = path.join(sourceRoot, "package.json")
+  if (!fs.existsSync(path.join(sourceDist, "index.js")) || !fs.existsSync(sourcePackage)) {
+    throw new Error("安装包缺少已构建的 dist/index.js 或 package.json")
+  }
+
+  const pluginsDirectory = path.join(configDirectory, "plugins")
+  const target = path.join(pluginsDirectory, PACKAGE_NAME)
+  const temporary = path.join(
+    pluginsDirectory,
+    `.${PACKAGE_NAME}.${process.pid}.${Date.now()}.tmp`,
+  )
+  const backup = `${target}.previous`
+  fs.mkdirSync(pluginsDirectory, { recursive: true })
+  fs.mkdirSync(temporary)
+  try {
+    fs.cpSync(sourceDist, path.join(temporary, "dist"), { recursive: true })
+    fs.copyFileSync(sourcePackage, path.join(temporary, "package.json"))
+    if (fs.existsSync(backup)) fs.rmSync(backup, { recursive: true, force: true })
+    if (fs.existsSync(target)) fs.renameSync(target, backup)
+    try {
+      fs.renameSync(temporary, target)
+    } catch (error) {
+      if (fs.existsSync(backup) && !fs.existsSync(target)) fs.renameSync(backup, target)
+      throw error
+    }
+    fs.rmSync(backup, { recursive: true, force: true })
+  } catch (error) {
+    fs.rmSync(temporary, { recursive: true, force: true })
+    throw error
+  }
+  return pathToFileURL(path.join(target, "dist", "index.js")).href
+}
 
 interface ConfigPatch {
   plugin: string
