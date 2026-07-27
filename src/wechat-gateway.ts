@@ -36,15 +36,42 @@ export class WeChatGateway {
   async bind(onQRCode?: (value: string) => void, force = false): Promise<void> {
     if (!force && this.store.loadAccount() && this.store.loadContext()) return
     const account = await this.transport.login(onQRCode, force)
-    this.store.saveAccount(account)
+    if (!account.userId) throw new Error("微信登录响应缺少用户标识")
+    let cursor = force ? "" : this.store.loadCursor()
 
-    let bound = false
-    while (!bound) {
-      await this.pollOnce(async (message) => {
-        if (message.senderID === account.userId && normalize(message.text) === "绑定") {
-          bound = true
+    while (true) {
+      const response = await this.transport.poll(cursor)
+      if (response.ret !== undefined && response.ret !== 0) {
+        throw new Error(`微信轮询失败: ${response.errmsg || response.ret}`)
+      }
+      if (typeof response.get_updates_buf === "string") {
+        cursor = response.get_updates_buf
+      }
+
+      for (const raw of response.msgs ?? []) {
+        const parsed = parseInbound(raw)
+        if (
+          !parsed ||
+          parsed.group ||
+          parsed.message.senderID !== account.userId ||
+          normalize(parsed.message.text) !== "绑定"
+        ) {
+          continue
         }
-      }, true)
+        if (!parsed.contextToken) throw new Error("绑定消息缺少上下文令牌")
+        this.store.commitBinding(
+          account,
+          {
+            boundUserID: account.userId,
+            contextToken: parsed.contextToken,
+            updatedAt: parsed.message.receivedAt,
+          },
+          cursor,
+        )
+        this.seen.add(parsed.message.messageID)
+        this.store.saveProcessedMessageIDs([...this.seen])
+        return
+      }
     }
   }
 

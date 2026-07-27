@@ -7,6 +7,12 @@ import type { AccountData } from "./types.js"
 
 export const WECHAT_DATA_DIR_NAME = "wechat-approve"
 
+interface StoredBinding {
+  account: AccountData
+  context: WeChatContext
+  cursor: string
+}
+
 export class WeChatStore {
   private readonly dir: string
   private ctxTokens = new Map<string, string>()
@@ -24,10 +30,17 @@ export class WeChatStore {
   }
 
   loadAccount(): AccountData | null {
+    const binding = this.loadBinding()
+    if (binding) return binding.account
     return this.readJSON<AccountData | null>("account.json", null, isAccountData)
   }
 
   saveAccount(data: AccountData): void {
+    const binding = this.loadBinding()
+    if (binding) {
+      this.atomicWrite("binding-v1.json", { ...binding, account: data })
+      return
+    }
     this.atomicWrite("account.json", data)
   }
 
@@ -40,6 +53,8 @@ export class WeChatStore {
   }
 
   loadContext(): WeChatContext | null {
+    const binding = this.loadBinding()
+    if (binding) return binding.context
     const current = this.readJSON<WeChatContext | null>("context-v1.json", null, isWeChatContext)
     if (current) return current
 
@@ -49,11 +64,18 @@ export class WeChatStore {
   }
 
   saveContext(context: WeChatContext): void {
+    const binding = this.loadBinding()
+    if (binding) {
+      this.atomicWrite("binding-v1.json", { ...binding, context })
+      return
+    }
     this.atomicWrite("context-v1.json", context)
     this.ctxTokens.set(context.boundUserID, context.contextToken)
   }
 
   loadCursor(): string {
+    const binding = this.loadBinding()
+    if (binding) return binding.cursor
     const data = this.readJSON<{ value: string } | null>(
       "cursor.json",
       null,
@@ -70,7 +92,16 @@ export class WeChatStore {
   }
 
   saveCursor(value: string): void {
+    const binding = this.loadBinding()
+    if (binding) {
+      this.atomicWrite("binding-v1.json", { ...binding, cursor: value })
+      return
+    }
     this.atomicWrite("cursor.json", { value })
+  }
+
+  commitBinding(account: AccountData, context: WeChatContext, cursor: string): void {
+    this.atomicWrite("binding-v1.json", { account, context, cursor })
   }
 
   loadProcessedMessageIDs(): string[] {
@@ -157,6 +188,14 @@ export class WeChatStore {
     } catch {}
   }
 
+  private loadBinding(): StoredBinding | null {
+    return this.readJSON<StoredBinding | null>(
+      "binding-v1.json",
+      null,
+      isStoredBinding,
+    )
+  }
+
   private atomicWrite(name: string, value: unknown): void {
     const file = path.join(this.dir, name)
     const temporary = `${file}.${process.pid}.${Date.now()}.tmp`
@@ -217,6 +256,15 @@ function isWeChatContext(value: unknown): value is WeChatContext {
     typeof value.boundUserID === "string" &&
     typeof value.contextToken === "string" &&
     typeof value.updatedAt === "number"
+  )
+}
+
+function isStoredBinding(value: unknown): value is StoredBinding {
+  return (
+    isRecord(value) &&
+    isAccountData(value.account) &&
+    isWeChatContext(value.context) &&
+    typeof value.cursor === "string"
   )
 }
 

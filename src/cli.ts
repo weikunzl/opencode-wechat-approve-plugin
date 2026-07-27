@@ -3,6 +3,7 @@ import path from "node:path"
 import { parse } from "jsonc-parser"
 import { isOwnedPluginSpec } from "./install.js"
 import { openCodeAuthorization, openCodeHeaders } from "./server-auth.js"
+import { WeChatStore } from "./store.js"
 
 export interface OpenCodePaths {
   home?: string
@@ -61,8 +62,9 @@ export async function doctorInstallation(options: {
     Array.isArray(plugins) &&
     plugins.some((item) => typeof item === "string" && isOwnedPluginSpec(item))
 
-  const account = asRecord(readJSONC(path.join(options.stateDirectory, "account.json")))
-  const context = asRecord(readJSONC(path.join(options.stateDirectory, "context-v1.json")))
+  const store = new WeChatStore(options.stateDirectory)
+  const account = asRecord(store.loadAccount())
+  const context = asRecord(store.loadContext())
   const bound =
     typeof account?.token === "string" &&
     typeof account.accountId === "string" &&

@@ -40,6 +40,28 @@ test("writes credential files with owner-only permissions", () => {
   assert.deepEqual(JSON.parse(readFileSync(join(root, "account.json"), "utf8")), account)
 })
 
+test("commits account, context, and cursor as one atomic binding", () => {
+  const { root, store } = temporaryStore()
+  const context = {
+    boundUserID: "owner@im.wechat",
+    contextToken: "context-secret",
+    updatedAt: 1,
+  }
+
+  store.commitBinding(account, context, "cursor-1")
+
+  assert.deepEqual(store.loadAccount(), account)
+  assert.deepEqual(store.loadContext(), context)
+  assert.equal(store.loadCursor(), "cursor-1")
+  assert.deepEqual(
+    JSON.parse(readFileSync(join(root, "binding-v1.json"), "utf8")),
+    { account, context, cursor: "cursor-1" },
+  )
+  if (process.platform !== "win32") {
+    assert.equal(statSync(join(root, "binding-v1.json")).mode & 0o777, 0o600)
+  }
+})
+
 test("round trips V1 approval and runtime state atomically", () => {
   const { store } = temporaryStore()
   const approval = {

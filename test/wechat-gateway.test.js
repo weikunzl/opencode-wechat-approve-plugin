@@ -267,3 +267,30 @@ test("binding ignores ordinary text and persists only the exact binding message 
     updatedAt: 1,
   })
 })
+
+test("an interrupted forced rebind preserves the previous binding and uses a fresh cursor", async () => {
+  const { store } = harness()
+  store.saveCursor("old-cursor")
+  const cursors = []
+  const gateway = new WeChatGateway(store, {
+    login: async () => ({
+      accountId: "new-bot",
+      token: "new-secret",
+      baseUrl: "https://example.invalid",
+      userId: "new-owner@im.wechat",
+      savedAt: "2026-07-27T00:00:00.000Z",
+    }),
+    poll: async (cursor) => {
+      cursors.push(cursor)
+      throw new Error("binding interrupted")
+    },
+    sendText: async () => {},
+  })
+
+  await assert.rejects(gateway.bind(undefined, true), /binding interrupted/)
+
+  assert.deepEqual(cursors, [""])
+  assert.equal(store.loadAccount().accountId, "bot@im.bot")
+  assert.equal(store.loadContext().boundUserID, "owner@im.wechat")
+  assert.equal(store.loadCursor(), "old-cursor")
+})
