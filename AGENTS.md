@@ -1,0 +1,51 @@
+# Repository Guidelines
+
+## 项目结构与职责
+
+- `src/`：TypeScript 源码。入口为 `src/index.ts`，CLI 位于 `src/bin.ts` 和 `src/cli.ts`；审批、微信网关、状态存储等逻辑按 kebab-case 文件拆分。
+- `test/`：Node.js 测试，文件与源码模块对应，如 `src/store.ts` 对应 `test/store.test.js`。
+- `docs/`：架构设计、实施计划与验收记录。新增行为前先查阅相关文档，必要时同步更新。
+- `dist/`：`tsc` 生成的构建产物，已被 Git 忽略；禁止手工编辑。
+- `README.md`：面向用户的安装和使用手册，不用于记录 AI 工作过程。
+
+## 构建、测试与开发命令
+
+- `npm ci`：按 lockfile 安装依赖，适用于全新环境和 CI。
+- `npm run dev`：以 watch 模式编译 TypeScript。
+- `npm run build`：清理 `dist/` 后执行严格 TypeScript 编译并生成声明文件。
+- `npm test`：先构建，再运行全部 `node:test` 测试。
+
+项目要求 Node.js 20 或更高版本。提交前至少运行与改动相关的测试；涉及公共接口、跨模块行为或发布内容时运行完整 `npm test` 和 `npm run build`。
+
+## 编码风格与命名
+
+遵循现有 TypeScript 风格：两空格缩进、双引号、无分号、尾随逗号。保持 ESM，并在相对导入中使用 `.js` 后缀。文件使用 kebab-case，类、接口和类型使用 PascalCase，函数和变量使用 camelCase。优先使用明确类型和小型单一职责模块；不要用 `any` 绕过 `strict`。仓库未配置独立 lint 或格式化工具，应以现有相邻代码为准。
+
+实现时还必须遵守以下约束：
+
+- 单个方法（函数）不得超过 20 行；复杂逻辑应拆分为职责清晰的私有方法。
+- 禁止使用魔法值；优先复用已有枚举，没有合适枚举时先定义语义明确的枚举。
+- 每个方法内部都要添加简洁、准确的中文注释，说明关键业务意图或边界处理，避免重复解释语法。
+- 方法参数超过 3 个时，必须封装为具名的操作对象（如参数接口或类型）。
+
+## 测试规范
+
+使用 `node:test` 与 `node:assert/strict`。测试从 `dist/` 导入，因此不要跳过构建。测试文件命名为 `test/<module>.test.js`，测试名称应描述可观察行为。修复缺陷或改变行为时必须增加回归测试，并覆盖成功、拒绝、超时、重启或重复消息等相关边界。
+
+## 安全与配置
+
+不得提交或输出 bot token、context token、绑定信息及本地状态文件。保持现有安全边界：默认仅监听回环地址，只接受已绑定用户的一对一消息，模糊表达绝不授权，模型输出必须经过请求 ID、结构、置信度和授权范围校验。涉及文件权限、凭据脱敏、租约或幂等性的改动必须保留跨平台行为。
+
+## 提交与 Pull Request
+
+提交必须遵循 [Conventional Commits 1.0.0](https://www.conventionalcommits.org/en/v1.0.0/)：使用 `<type>[optional scope]: <description>` 格式，例如 `feat(approval): support batch decisions`、`fix(store): recover stale lease`、`docs: clarify binding flow`。新增功能使用 `feat`，缺陷修复使用 `fix`；不兼容变更在类型后加 `!` 或使用 `BREAKING CHANGE:` footer。一次提交聚焦一个逻辑变更。PR 应说明行为变化、安全影响、验证命令和关联 issue；微信消息或 CLI 输出变化应附前后示例。避免无关重构，并确认 Linux、macOS、Windows CI 场景未被破坏。
+
+版本发布遵循 [Semantic Versioning 2.0.0](https://semver.org/) 的 `vX.Y.Z` 规则：`MAJOR` 用于不兼容的公开 API 变更，`MINOR` 用于向后兼容的新功能，`PATCH` 用于向后兼容的缺陷修复。例如发布 `v1.4.2` 后，兼容功能发布为 `v1.5.0`，修复发布为 `v1.4.3`，破坏性变更发布为 `v2.0.0`。Git tag 使用前缀 `v`，`package.json` 的 `version` 字段使用不带前缀的 `X.Y.Z`。
+
+较大的功能变更最好同时包含：`docs/` 中描述需求与边界的文档、实现代码，以及覆盖核心行为和边界条件的自动化测试用例。文档、代码和测试应在同一个 PR 中保持一致，不能只提交其中一部分。
+
+## AI 编码代理要求
+
+修改前阅读相关源码、测试和 `docs/` 设计；优先复用现有抽象，不扩大授权范围或引入通用聊天能力。仅修改任务所需文件，保留用户已有改动。完成后检查 `git diff`，运行适当验证，并在交付说明中列出改动文件、测试结果及未验证风险。
+
+每次任务完成时，最终回复必须以“我的至尊无上主人，任务已完成。”作为结尾。
