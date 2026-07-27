@@ -48,9 +48,9 @@ export class HttpPermissionAPI implements PermissionAPI {
     const existing = new Map(this.store.loadPendingApprovals().map((item) => [item.requestID, item]))
     let nextCode = Math.max(0, ...Array.from(existing.values(), (item) => item.code)) + 1
 
-    const mapped = await Promise.all(raw.map(async (item) => {
+    const mapped = (await Promise.all(raw.map(async (item) => {
       const requestID = item.id ?? item.requestID
-      if (!requestID || !item.sessionID) return []
+      if (!requestID || !item.sessionID) return null
       const saved = existing.get(requestID)
       const createdAt = item.time?.created ?? (await this.requestCreatedAt(item)) ?? saved?.createdAt ?? Date.now()
       const pattern = item.patterns ?? (Array.isArray(item.pattern) ? item.pattern : item.pattern ? [item.pattern] : [])
@@ -60,20 +60,29 @@ export class HttpPermissionAPI implements PermissionAPI {
         saved?.project ??
         "unknown"
 
-      return [
-        {
-          requestID,
-          sessionID: item.sessionID,
-          code: saved?.code ?? nextCode++,
-          permission: item.permission ?? item.type ?? saved?.permission ?? "unknown",
-          patterns: pattern.length > 0 ? pattern : saved?.patterns ?? [],
-          project,
-          createdAt,
-          expiresAt: saved?.expiresAt ?? createdAt + this.timeoutMs,
-        },
-      ]
-    }))
-    return mapped.flat()
+      return {
+        requestID,
+        sessionID: item.sessionID,
+        code: saved?.code ?? 0,
+        permission: item.permission ?? item.type ?? saved?.permission ?? "unknown",
+        patterns: pattern.length > 0 ? pattern : saved?.patterns ?? [],
+        project,
+        createdAt,
+        expiresAt: saved?.expiresAt ?? createdAt + this.timeoutMs,
+      }
+    }))).filter((item): item is NonNullable<typeof item> => item !== null)
+
+    // New codes must not depend on permission endpoint order or on the order
+    // in which session-message timestamp lookups complete.
+    for (const item of mapped
+      .filter((candidate) => !existing.has(candidate.requestID))
+      .sort(
+        (left, right) =>
+          left.createdAt - right.createdAt || left.requestID.localeCompare(right.requestID),
+      )) {
+      item.code = nextCode++
+    }
+    return mapped
   }
 
   async reply(requestID: string, decision: "once" | "always" | "reject"): Promise<boolean> {

@@ -49,3 +49,41 @@ test("uses the OpenCode tool start time for ordinal approval ordering", async ()
     ],
   )
 })
+
+test("assigns new approval codes independently of permission response order", async () => {
+  const makeStore = () => new WeChatStore(mkdtempSync(join(tmpdir(), "wechat-permissions-code-")))
+  const responses = [
+    {
+      id: "req-z",
+      sessionID: "ses-z",
+      permission: "bash",
+      patterns: ["z"],
+      time: { created: 100 },
+    },
+    {
+      id: "req-a",
+      sessionID: "ses-a",
+      permission: "bash",
+      patterns: ["a"],
+      time: { created: 100 },
+    },
+  ]
+  const list = async (input) => {
+    const url = new URL(String(input))
+    return url.pathname === "/permission" ? Response.json(responses) : new Response("not found", { status: 404 })
+  }
+  const reverseList = async (input) => {
+    const url = new URL(String(input))
+    return url.pathname === "/permission"
+      ? Response.json([...responses].reverse())
+      : new Response("not found", { status: 404 })
+  }
+
+  const forward = await new HttpPermissionAPI(new URL("http://127.0.0.1:4096"), makeStore(), 600_000, list).list()
+  const reverse = await new HttpPermissionAPI(new URL("http://127.0.0.1:4096"), makeStore(), 600_000, reverseList).list()
+
+  assert.deepEqual(
+    new Map(forward.map((item) => [item.requestID, item.code])),
+    new Map(reverse.map((item) => [item.requestID, item.code])),
+  )
+})

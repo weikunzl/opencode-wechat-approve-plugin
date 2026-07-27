@@ -86,7 +86,7 @@ function selectRequests(
 
   if (
     /(?:全部|所有|全都|两个都|三个都|都允许|都拒绝|都始终)/.test(text) ||
-    /(?:allow|approve)\s+all|all\s+(?:allow|approve|reject|deny)/.test(text)
+    /(?:allow|approve)\s+all|all\s+(?:allow|approve|reject|deny|always|permanent|forever)/.test(text)
   ) {
     return orderedForConversation(pending, conversation).map((item) => item.requestID)
   }

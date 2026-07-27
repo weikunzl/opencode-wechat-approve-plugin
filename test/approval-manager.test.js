@@ -68,6 +68,7 @@ test("applies all-request decisions for Chinese and English all forms", async ()
     ["全部始终允许", "always"],
     ["全部always", "always"],
     ["全部 always", "always"],
+    ["all always", "always"],
     ["全部拒绝", "reject"],
     ["全部 deny", "reject"],
     ["全部 reject", "reject"],
