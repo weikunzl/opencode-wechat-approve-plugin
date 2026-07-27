@@ -104,6 +104,53 @@ test("serializes concurrent error and idle events so failure cannot become done"
   )
 })
 
+test("a slow metadata lookup in one session does not block another session", async () => {
+  const root = mkdtempSync(join(tmpdir(), "wechat-session-notifier-independent-"))
+  const store = new WeChatStore(root)
+  let resolveSlowMetadata
+  const slowMetadata = new Promise((resolve) => {
+    resolveSlowMetadata = resolve
+  })
+  const notifier = new SessionNotifier(
+    store,
+    async (sessionID) =>
+      sessionID === "ses-slow"
+        ? slowMetadata
+        : { title: sessionID, directory: "/workspace/fast" },
+    () => 100,
+  )
+  await notifier.handle(status("ses-slow", "busy"))
+  const slowCompletion = notifier.handle(idle("ses-slow"))
+  await new Promise((resolve) => setImmediate(resolve))
+
+  const fastResult = await Promise.race([
+    notifier.handle(status("ses-fast", "busy")),
+    new Promise((resolve) => setImmediate(() => resolve("blocked"))),
+  ])
+
+  assert.deepEqual(fastResult, [])
+  resolveSlowMetadata({ title: "slow", directory: "/workspace/slow" })
+  await slowCompletion
+})
+
+test("bounds session metadata lookup time before falling back", async () => {
+  const root = mkdtempSync(join(tmpdir(), "wechat-session-notifier-timeout-"))
+  const store = new WeChatStore(root)
+  const notifier = new SessionNotifier(
+    store,
+    async () => new Promise(() => {}),
+    () => 100,
+    () => false,
+    10,
+  )
+  await notifier.handle(status("ses-timeout", "busy"))
+
+  const notices = await notifier.handle(idle("ses-timeout"))
+
+  assert.equal(notices.length, 1)
+  assert.match(notices[0].text, /ses-timeout/)
+})
+
 test("reports an aborted run as cancelled rather than failed or done", async () => {
   const { notifier } = harness()
 

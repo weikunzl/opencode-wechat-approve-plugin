@@ -26,23 +26,32 @@ interface SessionEventLike {
 
 export class SessionNotifier {
   private states = new Map<string, SessionRunState>()
-  private eventQueue: Promise<void> = Promise.resolve()
+  private eventQueues = new Map<string, Promise<void>>()
 
   constructor(
     private readonly store: WeChatStore,
     private readonly resolveMetadata: MetadataResolver,
     private readonly now: () => number = Date.now,
     private readonly shouldIgnore: (sessionID: string) => boolean = () => false,
+    private readonly metadataTimeoutMs = 5_000,
   ) {
     for (const state of store.loadSessionStates()) this.states.set(state.sessionID, state)
   }
 
   async handle(event: SessionEventLike): Promise<NotificationEnvelope[]> {
-    const task = this.eventQueue.then(() => this.handleSerial(event))
-    this.eventQueue = task.then(
+    const sessionID = eventSessionID(event)
+    if (!sessionID) return this.handleSerial(event)
+
+    const previous = this.eventQueues.get(sessionID) ?? Promise.resolve()
+    const task = previous.then(() => this.handleSerial(event))
+    const tail = task.then(
       () => undefined,
       () => undefined,
     )
+    this.eventQueues.set(sessionID, tail)
+    void tail.then(() => {
+      if (this.eventQueues.get(sessionID) === tail) this.eventQueues.delete(sessionID)
+    })
     return task
   }
 
@@ -185,8 +194,18 @@ export class SessionNotifier {
   }
 
   private async safeMetadata(sessionID: string): Promise<SessionMetadata> {
+    let timeout: ReturnType<typeof setTimeout> | null = null
     try {
-      const metadata = await this.resolveMetadata(sessionID)
+      const metadata = await Promise.race([
+        this.resolveMetadata(sessionID),
+        new Promise<never>((_, reject) => {
+          timeout = setTimeout(
+            () => reject(new Error("session metadata lookup timed out")),
+            this.metadataTimeoutMs,
+          )
+          timeout.unref()
+        }),
+      ])
       return {
         title: metadata.title || sessionID,
         directory: metadata.directory || "unknown",
@@ -197,12 +216,21 @@ export class SessionNotifier {
         title: current?.title || sessionID,
         directory: current?.directory || "unknown",
       }
+    } finally {
+      if (timeout) clearTimeout(timeout)
     }
   }
 
   private persist(): void {
     this.store.saveSessionStates(this.snapshot())
   }
+}
+
+function eventSessionID(event: SessionEventLike): string | null {
+  if (event.type === "session.updated" || event.type === "session.created") {
+    return event.properties?.info?.id ?? null
+  }
+  return event.properties?.sessionID ?? null
 }
 
 function errorName(error: unknown): string {
