@@ -67,6 +67,23 @@ test("never takes over a stale lease owned by a live process", () => {
   assert.equal(lease.acquire(), false)
 })
 
+test("reclaims a lease when the pid belongs to a different process start", () => {
+  const root = mkdtempSync(join(tmpdir(), "wechat-runtime-lease-pid-reuse-"))
+  writeFileSync(
+    join(root, "runtime-lease.json"),
+    JSON.stringify({
+      instanceID: "crashed-owner",
+      pid: process.pid,
+      processStart: "different-process-start",
+      heartbeatAt: Date.now(),
+    }),
+  )
+  const lease = new RuntimeLease(root)
+
+  assert.equal(lease.acquire(), true)
+  lease.release()
+})
+
 test("reports lease loss after another owner replaces the file", async () => {
   const root = mkdtempSync(join(tmpdir(), "wechat-runtime-lease-loss-"))
   let lost = false

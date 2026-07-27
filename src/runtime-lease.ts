@@ -1,10 +1,12 @@
 import crypto from "node:crypto"
+import { spawnSync } from "node:child_process"
 import fs from "node:fs"
 import path from "node:path"
 
 interface LeaseRecord {
   instanceID: string
   pid: number
+  processStart?: string
   heartbeatAt: number
 }
 
@@ -14,6 +16,7 @@ export class RuntimeLease {
   private readonly now: () => number
   private readonly staleAfterMs: number
   private readonly heartbeatIntervalMs: number
+  private readonly processStart = processFingerprint(process.pid)
   private timer: ReturnType<typeof setInterval> | null = null
   private onLost: (() => void) | null = null
 
@@ -45,20 +48,10 @@ export class RuntimeLease {
 
     const current = this.read()
     if (!current) {
-      if (!this.quarantineCorrupt()) return false
-      if (!this.tryCreate()) return false
-      this.startHeartbeat()
-      return true
+      return this.claimAndAcquire(null)
     }
-    if (processExists(current.pid)) return false
-    try {
-      fs.unlinkSync(this.file)
-    } catch {
-      return false
-    }
-    if (!this.tryCreate()) return false
-    this.startHeartbeat()
-    return true
+    if (sameProcess(current)) return false
+    return this.claimAndAcquire(current.instanceID)
   }
 
   release(): void {
@@ -131,16 +124,46 @@ export class RuntimeLease {
     return `${this.file}.${process.pid}.${crypto.randomUUID()}.tmp`
   }
 
-  private quarantineCorrupt(): boolean {
+  private claimAndAcquire(expectedInstanceID: string | null): boolean {
+    const claim = `${this.file}.claim-${process.pid}-${crypto.randomUUID()}`
     try {
-      fs.renameSync(
-        this.file,
-        `${this.file}.corrupt-${this.now()}-${crypto.randomUUID()}`,
-      )
-      return true
+      fs.renameSync(this.file, claim)
     } catch {
       return false
     }
+    const claimed = readLeaseFile(claim)
+    if (
+      (expectedInstanceID === null && claimed !== null) ||
+      (expectedInstanceID !== null && claimed?.instanceID !== expectedInstanceID)
+    ) {
+      this.restoreClaim(claim)
+      return false
+    }
+    if (!this.tryCreate()) {
+      this.restoreClaim(claim)
+      return false
+    }
+    if (claimed === null) {
+      try {
+        fs.renameSync(
+          claim,
+          `${this.file}.corrupt-${this.now()}-${crypto.randomUUID()}`,
+        )
+      } catch {}
+    } else {
+      try {
+        fs.unlinkSync(claim)
+      } catch {}
+    }
+    this.startHeartbeat()
+    return true
+  }
+
+  private restoreClaim(claim: string): void {
+    try {
+      if (!fs.existsSync(this.file)) fs.renameSync(claim, this.file)
+      else fs.unlinkSync(claim)
+    } catch {}
   }
 
   private lose(): void {
@@ -155,6 +178,7 @@ export class RuntimeLease {
     return {
       instanceID: this.instanceID,
       pid: process.pid,
+      ...(this.processStart ? { processStart: this.processStart } : {}),
       heartbeatAt: this.now(),
     }
   }
@@ -164,6 +188,7 @@ export class RuntimeLease {
       const value = JSON.parse(fs.readFileSync(this.file, "utf8")) as Partial<LeaseRecord>
       return typeof value.instanceID === "string" &&
         typeof value.pid === "number" &&
+        (value.processStart === undefined || typeof value.processStart === "string") &&
         typeof value.heartbeatAt === "number"
         ? (value as LeaseRecord)
         : null
@@ -173,6 +198,13 @@ export class RuntimeLease {
   }
 }
 
+function sameProcess(record: LeaseRecord): boolean {
+  if (!processExists(record.pid)) return false
+  if (!record.processStart) return true
+  const currentStart = processFingerprint(record.pid)
+  return currentStart !== null && currentStart === record.processStart
+}
+
 function processExists(pid: number): boolean {
   try {
     process.kill(pid, 0)
@@ -180,4 +212,48 @@ function processExists(pid: number): boolean {
   } catch (error) {
     return (error as NodeJS.ErrnoException).code === "EPERM"
   }
+}
+
+function readLeaseFile(file: string): LeaseRecord | null {
+  try {
+    const value = JSON.parse(fs.readFileSync(file, "utf8")) as Partial<LeaseRecord>
+    return typeof value.instanceID === "string" &&
+      typeof value.pid === "number" &&
+      (value.processStart === undefined || typeof value.processStart === "string") &&
+      typeof value.heartbeatAt === "number"
+      ? (value as LeaseRecord)
+      : null
+  } catch {
+    return null
+  }
+}
+
+function processFingerprint(pid: number): string | null {
+  try {
+    if (process.platform === "linux") {
+      const stat = fs.readFileSync(`/proc/${pid}/stat`, "utf8")
+      const end = stat.lastIndexOf(")")
+      const fields = stat.slice(end + 2).split(" ")
+      return fields[19] ? `linux:${fields[19]}` : null
+    }
+    if (process.platform === "darwin" || process.platform === "freebsd") {
+      const result = spawnSync("ps", ["-p", String(pid), "-o", "lstart="], {
+        encoding: "utf8",
+        windowsHide: true,
+      })
+      const value = result.status === 0 ? result.stdout.trim() : ""
+      return value ? `${process.platform}:${value}` : null
+    }
+    if (process.platform === "win32") {
+      const script = `(Get-Process -Id ${pid} -ErrorAction Stop).StartTime.ToUniversalTime().Ticks`
+      const result = spawnSync(
+        "powershell.exe",
+        ["-NoProfile", "-NonInteractive", "-Command", script],
+        { encoding: "utf8", windowsHide: true },
+      )
+      const value = result.status === 0 ? result.stdout.trim() : ""
+      return value ? `win32:${value}` : null
+    }
+  } catch {}
+  return null
 }
