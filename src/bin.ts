@@ -72,7 +72,7 @@ async function main(args: string[]): Promise<number> {
           .toLowerCase()
         return answer === "" || answer === "y" || answer === "yes" || answer === "是"
       },
-      bind: async () => bind(gateway),
+      bind: async (force) => bind(gateway, force),
       sendTest: async () => sendTest(gateway),
       pluginName: pluginSpec,
     })
@@ -85,6 +85,7 @@ async function main(args: string[]): Promise<number> {
 }
 
 async function bind(gateway: WeChatGateway, force = false): Promise<void> {
+  if (!force && (await gateway.initialize()) === "ready") return
   process.stdout.write("请使用微信扫码并确认，然后向机器人发送“绑定”。\n")
   await gateway.bind((value) => {
     qrcode.generate(value, { small: true }, (rendered) => process.stdout.write(`${rendered}\n`))

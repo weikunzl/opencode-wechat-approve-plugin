@@ -150,6 +150,7 @@ test("migrates a legacy binding before doctor checks the installation", async ()
   })
   writeFileSync(join(stateDirectory, "context.json"), '{"owner":"legacy-context"}')
   const reloaded = new WeChatStore(stateDirectory)
+  const bindForces = []
 
   await install({
     configFile,
@@ -157,11 +158,52 @@ test("migrates a legacy binding before doctor checks the installation", async ()
     availableModels: ["opencode-go/qwen3.7-max"],
     configuredModel: "opencode-go/qwen3.7-max",
     confirmModel: async () => true,
-    bind: async () => {},
+    bind: async (force) => {
+      bindForces.push(force)
+      reloaded.saveContext({
+        boundUserID: "owner",
+        contextToken: "fresh-context",
+        updatedAt: 100,
+      })
+    },
     sendTest: async () => true,
   })
 
+  assert.deepEqual(bindForces, [true])
   assert.equal(JSON.parse(readFileSync(join(stateDirectory, "context-v1.json"))).boundUserID, "owner")
+  assert.equal(JSON.parse(readFileSync(join(stateDirectory, "context-v1.json"))).updatedAt, 100)
+})
+
+test("reuses a recently refreshed binding without forcing a new QR login", async () => {
+  const root = mkdtempSync(join(tmpdir(), "wechat-installer-fresh-binding-"))
+  const configFile = join(root, "opencode.jsonc")
+  writeFileSync(configFile, "{}\n")
+  const store = new WeChatStore(join(root, "state"))
+  store.saveAccount({
+    token: "secret",
+    baseUrl: "https://example.invalid",
+    accountId: "bot",
+    userId: "owner",
+    savedAt: "2026-07-27T00:00:00.000Z",
+  })
+  store.saveContext({
+    boundUserID: "owner",
+    contextToken: "fresh-context",
+    updatedAt: 100,
+  })
+  const bindForces = []
+
+  await install({
+    configFile,
+    store,
+    availableModels: ["opencode-go/qwen3.7-max"],
+    configuredModel: "opencode-go/qwen3.7-max",
+    confirmModel: async () => true,
+    bind: async (force) => bindForces.push(force),
+    sendTest: async () => true,
+  })
+
+  assert.deepEqual(bindForces, [false])
 })
 
 test("stages a self-contained global plugin entry from a GitHub installation", () => {

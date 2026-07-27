@@ -54,7 +54,7 @@ interface InstallOptions {
   availableModels: string[]
   configuredModel: string | null
   confirmModel(model: string): Promise<boolean>
-  bind(): Promise<void>
+  bind(force: boolean): Promise<void>
   sendTest(): Promise<boolean>
   pluginName?: string
   hostname?: string
@@ -105,8 +105,18 @@ export async function install(options: InstallOptions): Promise<void> {
   })
   atomicWriteText(options.configFile, updated)
 
-  await options.bind()
-  if (!options.store.loadAccount() || !options.store.loadContext()) {
+  const previousContext = options.store.loadContext()
+  const forceBinding =
+    !options.store.loadAccount() ||
+    !previousContext ||
+    previousContext.updatedAt <= 0
+  await options.bind(forceBinding)
+  const currentContext = options.store.loadContext()
+  if (
+    !options.store.loadAccount() ||
+    !currentContext ||
+    currentContext.updatedAt <= 0
+  ) {
     throw new Error("未收到绑定消息（请发送“绑定”），无法完成微信绑定")
   }
   if (!(await options.sendTest())) throw new Error("微信测试通知发送失败")
