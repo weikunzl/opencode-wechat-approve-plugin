@@ -303,6 +303,11 @@ Use fake OpenCode and fake iLink HTTP servers to verify:
 
 On the user's machine:
 
+Desktop automation may interact only with the WeChat conversation whose title
+is exactly `微信ClawBot`. Before every send, the acceptance driver must read the
+active conversation title and stop if it is not an exact match. It must not
+open, inspect, or send to any other contact, conversation, or group.
+
 1. Run the installer and confirm the selected model.
 2. Reuse or renew QR binding and send `绑定`.
 3. Start the central server on port 4096.

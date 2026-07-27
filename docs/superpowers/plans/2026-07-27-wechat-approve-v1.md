@@ -666,7 +666,9 @@ entry, run `doctor`, restart only the central `opencode web` process, and verify
 
 Use the logged-in macOS WeChat client, with Accessibility permission, to send
 the binding and approval phrases listed in the design's twelve-step acceptance
-flow. Capture:
+flow. Interact only with the conversation whose visible title is exactly
+`微信ClawBot`; re-read the title before every send and stop on any mismatch.
+Capture:
 
 - OpenCode request IDs and reply payloads;
 - WeChat notification text;
