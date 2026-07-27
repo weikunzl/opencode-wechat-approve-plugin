@@ -64,6 +64,46 @@ test("failure suppresses the following idle success and deduplicates errors", as
   assert.equal(afterFailure.length, 0)
 })
 
+test("serializes concurrent error and idle events so failure cannot become done", async () => {
+  const root = mkdtempSync(join(tmpdir(), "wechat-session-notifier-race-"))
+  const store = new WeChatStore(root)
+  let resolveMetadata
+  let metadataCalls = 0
+  const metadata = new Promise((resolve) => {
+    resolveMetadata = resolve
+  })
+  const notifier = new SessionNotifier(
+    store,
+    async () => {
+      metadataCalls += 1
+      return metadata
+    },
+    () => 100,
+  )
+  await notifier.handle(status("ses-race", "busy"))
+
+  const failedPromise = notifier.handle(
+    error("ses-race", {
+      name: "UnknownError",
+      data: { message: "Model not found" },
+    }),
+  )
+  await new Promise((resolve) => setImmediate(resolve))
+  const idlePromise = notifier.handle(idle("ses-race"))
+  await new Promise((resolve) => setImmediate(resolve))
+  resolveMetadata({ title: "race", directory: "/workspace/docs" })
+
+  const [failed, afterFailure] = await Promise.all([failedPromise, idlePromise])
+
+  assert.equal(metadataCalls, 1)
+  assert.equal(failed[0].kind, "error")
+  assert.deepEqual(afterFailure, [])
+  assert.equal(
+    store.loadOutbox().some((notice) => notice.kind === "done"),
+    false,
+  )
+})
+
 test("reports an aborted run as cancelled rather than failed or done", async () => {
   const { notifier } = harness()
 

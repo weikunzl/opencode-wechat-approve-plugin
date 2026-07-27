@@ -26,6 +26,7 @@ interface SessionEventLike {
 
 export class SessionNotifier {
   private states = new Map<string, SessionRunState>()
+  private eventQueue: Promise<void> = Promise.resolve()
 
   constructor(
     private readonly store: WeChatStore,
@@ -37,6 +38,15 @@ export class SessionNotifier {
   }
 
   async handle(event: SessionEventLike): Promise<NotificationEnvelope[]> {
+    const task = this.eventQueue.then(() => this.handleSerial(event))
+    this.eventQueue = task.then(
+      () => undefined,
+      () => undefined,
+    )
+    return task
+  }
+
+  private async handleSerial(event: SessionEventLike): Promise<NotificationEnvelope[]> {
     if (event.type === "session.updated" || event.type === "session.created") {
       const info = event.properties?.info
       if (!info?.id || this.shouldIgnore(info.id)) return []
