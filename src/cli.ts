@@ -1,7 +1,7 @@
 import fs from "node:fs"
 import path from "node:path"
 import { parse } from "jsonc-parser"
-import { PACKAGE_NAME } from "./install.js"
+import { isOwnedPluginSpec } from "./install.js"
 import { openCodeAuthorization, openCodeHeaders } from "./server-auth.js"
 
 export interface OpenCodePaths {
@@ -59,14 +59,7 @@ export async function doctorInstallation(options: {
   const plugins = asRecord(globalConfig)?.plugin
   const configured =
     Array.isArray(plugins) &&
-    plugins.some(
-      (item) =>
-        typeof item === "string" &&
-        (item === PACKAGE_NAME ||
-          item.startsWith(`${PACKAGE_NAME}@`) ||
-          (item.startsWith("file:") &&
-            item.includes(`/plugins/${PACKAGE_NAME}/dist/index.js`))),
-    )
+    plugins.some((item) => typeof item === "string" && isOwnedPluginSpec(item))
 
   const account = asRecord(readJSONC(path.join(options.stateDirectory, "account.json")))
   const context = asRecord(readJSONC(path.join(options.stateDirectory, "context-v1.json")))

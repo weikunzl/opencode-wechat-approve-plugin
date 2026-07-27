@@ -33,6 +33,29 @@ test("preserves JSONC comments and unrelated settings while installing idempoten
   assert.match(twice, /"port": 4096/)
 })
 
+test("replaces every previously managed plugin alias with one entry", () => {
+  const source = JSON.stringify({
+    plugin: [
+      "existing-plugin",
+      "opencode-wechat-approve-plugin",
+      "opencode-wechat-approve-plugin@0.9.0",
+      "file:///Users/test/.config/opencode/plugins/opencode-wechat-approve-plugin/dist/index.js",
+    ],
+  })
+  const managed =
+    "file:///Users/test/.config/opencode/managed-plugins/opencode-wechat-approve-plugin/dist/index.js"
+
+  const patched = JSON.parse(
+    patchOpenCodeConfig(source, {
+      plugin: managed,
+      hostname: "127.0.0.1",
+      port: 4096,
+    }),
+  )
+
+  assert.deepEqual(patched.plugin, ["existing-plugin", managed])
+})
+
 test("persists the confirmed model and finishes only after binding and test delivery", async () => {
   const root = mkdtempSync(join(tmpdir(), "wechat-installer-"))
   const configFile = join(root, "opencode.jsonc")
@@ -157,13 +180,13 @@ test("stages a self-contained global plugin entry from a GitHub installation", (
   assert.match(spec, /^file:/)
   assert.equal(
     readFileSync(
-      join(configDirectory, "plugins", "opencode-wechat-approve-plugin", "dist", "index.js"),
+      join(configDirectory, "managed-plugins", "opencode-wechat-approve-plugin", "dist", "index.js"),
       "utf8",
     ),
     "export default async () => ({})\n",
   )
   assert.equal(
     fileURLToPath(spec),
-    join(configDirectory, "plugins", "opencode-wechat-approve-plugin", "dist", "index.js"),
+    join(configDirectory, "managed-plugins", "opencode-wechat-approve-plugin", "dist", "index.js"),
   )
 })

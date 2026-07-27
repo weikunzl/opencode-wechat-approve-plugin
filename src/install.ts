@@ -14,14 +14,14 @@ export function stageLocalPlugin(sourceRoot: string, configDirectory: string): s
     throw new Error("安装包缺少已构建的 dist/index.js 或 package.json")
   }
 
-  const pluginsDirectory = path.join(configDirectory, "plugins")
-  const target = path.join(pluginsDirectory, PACKAGE_NAME)
+  const managedDirectory = path.join(configDirectory, "managed-plugins")
+  const target = path.join(managedDirectory, PACKAGE_NAME)
   const temporary = path.join(
-    pluginsDirectory,
+    managedDirectory,
     `.${PACKAGE_NAME}.${process.pid}.${Date.now()}.tmp`,
   )
   const backup = `${target}.previous`
-  fs.mkdirSync(pluginsDirectory, { recursive: true })
+  fs.mkdirSync(managedDirectory, { recursive: true })
   fs.mkdirSync(temporary)
   try {
     fs.cpSync(sourceDist, path.join(temporary, "dist"), { recursive: true })
@@ -65,15 +65,28 @@ export function patchOpenCodeConfig(source: string, patch: ConfigPatch): string 
   let output = source.trim() ? source : "{}\n"
   const parsed = parse(output) as { plugin?: unknown } | undefined
   const currentPlugins = Array.isArray(parsed?.plugin)
-    ? parsed.plugin.filter((item): item is string => typeof item === "string")
+    ? parsed.plugin
+        .filter((item): item is string => typeof item === "string")
+        .filter((item) => !isOwnedPluginSpec(item))
     : []
-  const plugins = currentPlugins.includes(patch.plugin) ? currentPlugins : [...currentPlugins, patch.plugin]
+  const plugins = [...currentPlugins, patch.plugin]
   const formattingOptions = { insertSpaces: true, tabSize: 2, eol: detectEOL(output) }
 
   output = applyEdits(output, modify(output, ["plugin"], plugins, { formattingOptions }))
   output = applyEdits(output, modify(output, ["server", "hostname"], patch.hostname, { formattingOptions }))
   output = applyEdits(output, modify(output, ["server", "port"], patch.port, { formattingOptions }))
   return output.endsWith(formattingOptions.eol) ? output : `${output}${formattingOptions.eol}`
+}
+
+export function isOwnedPluginSpec(spec: string): boolean {
+  if (spec === PACKAGE_NAME || spec.startsWith(`${PACKAGE_NAME}@`)) return true
+  if (!spec.startsWith("file:")) return false
+  try {
+    const pathname = decodeURIComponent(new URL(spec).pathname).replaceAll("\\", "/")
+    return pathname.endsWith(`/${PACKAGE_NAME}/dist/index.js`)
+  } catch {
+    return false
+  }
 }
 
 export async function install(options: InstallOptions): Promise<void> {
