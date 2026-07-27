@@ -40,6 +40,7 @@ export function sanitizeNotificationText(text: string, limit = 1_800): string {
       /(^|[^a-z0-9])([a-z0-9_-]*(?:authorization|api[_-]?key|access[_-]?token|context[_-]?token|password|passwd|secret(?:[_-]?access[_-]?key)?))(\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\s,;}\]]+)/gim,
       "$1$2$3[REDACTED]",
     )
+    .replace(/\[REDACTED\]\]+/g, "[REDACTED]")
     .replace(/\b(?:gh[opsu]_[A-Za-z0-9]{20,}|sk-[A-Za-z0-9_-]{20,})\b/g, "[REDACTED]")
   if (redacted.length <= limit) return redacted
   const suffix = "\n…[truncated]"

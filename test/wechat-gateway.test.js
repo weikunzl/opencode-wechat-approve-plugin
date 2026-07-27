@@ -261,6 +261,7 @@ test("redacts credentials and bounds every outbound WeChat notification", async 
     /top-secret|private-value|openai-secret|aws-secret|my-password|json-openai-secret|json-aws-secret|single-quoted-secret|123456|\babc\b|\bdef\b/,
   )
   assert.match(sent[0].text, /\[REDACTED\]/)
+  assert.doesNotMatch(sent[0].text, /\[REDACTED\]\]/)
   assert.ok(sent[0].text.length <= 1_800)
 })
 
