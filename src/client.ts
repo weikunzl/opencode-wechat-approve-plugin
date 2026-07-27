@@ -82,12 +82,21 @@ export class IlinkClientTransport implements IlinkTransport {
     }
   }
 
-  async sendText(to: string, text: string, contextToken: string): Promise<void> {
+  async sendText(
+    to: string,
+    text: string,
+    contextToken: string,
+    idempotencyKey: string,
+  ): Promise<void> {
     await this.apiCall("ilink/bot/sendmessage", {
       msg: {
         from_user_id: "",
         to_user_id: to,
-        client_id: `opencode-wechat:${Date.now()}-${crypto.randomBytes(4).toString("hex")}`,
+        client_id: `opencode-wechat:${crypto
+          .createHash("sha256")
+          .update(idempotencyKey)
+          .digest("hex")
+          .slice(0, 32)}`,
         message_type: MSG_TYPE_BOT,
         message_state: MSG_STATE_FINISH,
         item_list: [{ type: MSG_ITEM_TEXT, text_item: { text } }],

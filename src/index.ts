@@ -5,6 +5,7 @@ import type { NotificationEnvelope } from "./domain.js"
 import { InternalSessionRegistry } from "./internal-session-registry.js"
 import { HttpPermissionAPI } from "./opencode-permissions.js"
 import { OpenCodeApprovalModel } from "./opencode-model.js"
+import { RuntimeLease } from "./runtime-lease.js"
 import { SessionNotifier } from "./session-notifier.js"
 import { WeChatStore } from "./store.js"
 import { WeChatGateway, type InboundApprovalMessage } from "./wechat-gateway.js"
@@ -14,6 +15,7 @@ interface RuntimeGateway {
   flushOutbox(): Promise<void>
   start(onMessage: (message: InboundApprovalMessage) => Promise<void>): void
   send(notification: NotificationEnvelope): Promise<void>
+  stop?(): Promise<void>
 }
 
 interface RuntimeApprovalManager {
@@ -21,6 +23,7 @@ interface RuntimeApprovalManager {
   onPermissionAsked(event: PermissionAskedLike): Promise<NotificationEnvelope[]>
   onPermissionReplied(event: PermissionRepliedLike): Promise<void>
   onMessage(message: InboundApprovalMessage): Promise<NotificationEnvelope[]>
+  expire?(): Promise<NotificationEnvelope[]>
 }
 
 interface RuntimeSessionNotifier {
@@ -56,8 +59,21 @@ export function createPluginRuntime(dependencies: {
   gateway: RuntimeGateway
   approvalManager: RuntimeApprovalManager
   sessionNotifier: RuntimeSessionNotifier
+  lease?: { acquire(): boolean; release(): void }
+  timers?: {
+    setInterval(callback: () => void, milliseconds: number): unknown
+    clearInterval(id: unknown): void
+  }
 }) {
-  const { gateway, approvalManager, sessionNotifier } = dependencies
+  const { gateway, approvalManager, sessionNotifier, lease } = dependencies
+  const timers = dependencies.timers ?? {
+    setInterval: (callback: () => void, milliseconds: number) =>
+      globalThis.setInterval(callback, milliseconds),
+    clearInterval: (id: unknown) =>
+      globalThis.clearInterval(id as ReturnType<typeof globalThis.setInterval>),
+  }
+  let active = false
+  let expiryTimer: unknown = null
 
   const deliver = async (notifications: NotificationEnvelope[]): Promise<void> => {
     for (const notification of notifications) {
@@ -71,6 +87,15 @@ export function createPluginRuntime(dependencies: {
 
   const hooks = {
     event: async ({ event }: { event: EventLike }): Promise<void> => {
+      if (event.type === "global.disposed" || event.type === "server.instance.disposed") {
+        active = false
+        if (expiryTimer !== null) timers.clearInterval(expiryTimer)
+        expiryTimer = null
+        await gateway.stop?.()
+        lease?.release()
+        return
+      }
+      if (!active) return
       if (isPermissionAsked(event)) {
         await deliver(await approvalManager.onPermissionAsked(event))
         return
@@ -89,8 +114,13 @@ export function createPluginRuntime(dependencies: {
   return {
     hooks,
     async start(): Promise<boolean> {
+      if (lease && !lease.acquire()) {
+        console.error("[wechat] 另一插件实例已持有微信轮询租约；当前实例已禁用微信处理")
+        return false
+      }
       if ((await gateway.initialize()) !== "ready") {
         console.error("[wechat] 尚未完成绑定；请运行 wechat-approve bind")
+        lease?.release()
         return false
       }
 
@@ -109,6 +139,25 @@ export function createPluginRuntime(dependencies: {
       gateway.start(async (message) => {
         await deliver(await approvalManager.onMessage(message))
       })
+      active = true
+      if (approvalManager.expire) {
+        expiryTimer = timers.setInterval(() => {
+          void approvalManager
+            .expire?.()
+            .then(deliver)
+            .catch((error) =>
+              console.error(`[wechat] 授权超时检查失败: ${firstLine(error)}`),
+            )
+        }, 30_000)
+        if (
+          expiryTimer &&
+          typeof expiryTimer === "object" &&
+          "unref" in expiryTimer &&
+          typeof expiryTimer.unref === "function"
+        ) {
+          expiryTimer.unref()
+        }
+      }
       return true
     },
   }
@@ -117,6 +166,7 @@ export function createPluginRuntime(dependencies: {
 export const WeChatPlugin: Plugin = async (input) => {
   const store = new WeChatStore()
   store.migrateLegacyState()
+  const lease = new RuntimeLease(store.getDirectory())
   const config = store.loadPluginConfig()
   const internalSessions = new InternalSessionRegistry()
 
@@ -151,7 +201,7 @@ export const WeChatPlugin: Plugin = async (input) => {
     Date.now,
     (sessionID) => internalSessions.has(sessionID),
   )
-  const runtime = createPluginRuntime({ gateway, approvalManager, sessionNotifier })
+  const runtime = createPluginRuntime({ gateway, approvalManager, sessionNotifier, lease })
   await runtime.start()
   return runtime.hooks as Awaited<ReturnType<Plugin>>
 }

@@ -45,8 +45,8 @@ function harness() {
   const sent = []
   const transport = {
     poll: async () => batches.shift() ?? { ret: 0, msgs: [], get_updates_buf: "empty" },
-    sendText: async (to, text, contextToken) => {
-      sent.push({ to, text, contextToken })
+    sendText: async (to, text, contextToken, idempotencyKey) => {
+      sent.push({ to, text, contextToken, idempotencyKey })
     },
     login: async () => {
       throw new Error("not expected")
@@ -106,6 +106,33 @@ test("persists outbound notification until delivery succeeds", async () => {
 
   await gateway.send(notification)
 
-  assert.deepEqual(sent, [{ to: "owner@im.wechat", text: "任务完成", contextToken: "ctx" }])
+  assert.deepEqual(sent, [
+    {
+      to: "owner@im.wechat",
+      text: "任务完成",
+      contextToken: "ctx",
+      idempotencyKey: "notice-1",
+    },
+  ])
   assert.deepEqual(store.loadOutbox(), [])
+})
+
+test("deduplicates an inbound message after a process restart", async () => {
+  const { batches, gateway, store } = harness()
+  const messages = []
+  const duplicate = privateText({ senderID: "owner@im.wechat", text: "好的", id: "m-restart" })
+  batches.push({ ret: 0, get_updates_buf: "cursor-1", msgs: [duplicate] })
+  await gateway.pollOnce(async (message) => messages.push(message))
+
+  const restartedTransport = {
+    login: async () => {
+      throw new Error("not expected")
+    },
+    poll: async () => ({ ret: 0, get_updates_buf: "cursor-2", msgs: [duplicate] }),
+    sendText: async () => {},
+  }
+  const restarted = new WeChatGateway(store, restartedTransport)
+  await restarted.pollOnce(async (message) => messages.push(message))
+
+  assert.deepEqual(messages.map((message) => message.messageID), ["m-restart"])
 })

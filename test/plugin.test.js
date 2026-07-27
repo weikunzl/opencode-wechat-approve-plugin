@@ -70,3 +70,66 @@ test("exposes no general-purpose WeChat AI tools or permission interception hook
   assert.equal(runtime.hooks.tool, undefined)
   assert.equal(runtime.hooks["permission.ask"], undefined)
 })
+
+test("a secondary plugin instance emits no duplicate notifications", async () => {
+  const { runtime, gateway } = createHarness()
+  const secondary = createPluginRuntime({
+    gateway,
+    approvalManager: {
+      reconcile: async () => [],
+      onPermissionAsked: async () => [],
+      onPermissionReplied: async () => {},
+      onMessage: async () => [],
+    },
+    sessionNotifier: {
+      handle: async () => [
+        { id: "duplicate", kind: "done", text: "duplicate", createdAt: 1 },
+      ],
+    },
+    lease: { acquire: () => false, release: () => {} },
+  })
+
+  assert.equal(await secondary.start(), false)
+  await secondary.hooks.event({
+    event: { type: "session.idle", properties: { sessionID: "ses-1" } },
+  })
+
+  assert.deepEqual(gateway.sent, [])
+  assert.equal(runtime.hooks.tool, undefined)
+})
+
+test("periodically rejects expired approvals and stops the timer on disposal", async () => {
+  const gateway = createGateway()
+  let tick
+  let cleared = false
+  const runtime = createPluginRuntime({
+    gateway,
+    approvalManager: {
+      reconcile: async () => [],
+      onPermissionAsked: async () => [],
+      onPermissionReplied: async () => {},
+      onMessage: async () => [],
+      expire: async () => [
+        { id: "expired", kind: "approval-result", text: "expired", createdAt: 1 },
+      ],
+    },
+    sessionNotifier: { handle: async () => [] },
+    timers: {
+      setInterval: (callback) => {
+        tick = callback
+        return 7
+      },
+      clearInterval: (id) => {
+        assert.equal(id, 7)
+        cleared = true
+      },
+    },
+  })
+
+  await runtime.start()
+  await tick()
+  assert.deepEqual(gateway.sent.map((item) => item.id), ["expired"])
+
+  await runtime.hooks.event({ event: { type: "global.disposed", properties: {} } })
+  assert.equal(cleared, true)
+})

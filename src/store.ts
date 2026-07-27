@@ -19,6 +19,10 @@ export class WeChatStore {
     this.loadLegacyContextTokens()
   }
 
+  getDirectory(): string {
+    return this.dir
+  }
+
   loadAccount(): AccountData | null {
     return this.readJSON<AccountData | null>("account.json", null, isAccountData)
   }
@@ -67,6 +71,19 @@ export class WeChatStore {
 
   saveCursor(value: string): void {
     this.atomicWrite("cursor.json", { value })
+  }
+
+  loadProcessedMessageIDs(): string[] {
+    return this.readJSON<string[]>(
+      "processed-messages.json",
+      [],
+      (value): value is string[] =>
+        Array.isArray(value) && value.every((item) => typeof item === "string"),
+    )
+  }
+
+  saveProcessedMessageIDs(value: string[]): void {
+    this.atomicWrite("processed-messages.json", value.slice(-2_000))
   }
 
   loadPendingApprovals(): PendingApproval[] {

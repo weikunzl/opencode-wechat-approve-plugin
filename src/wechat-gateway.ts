@@ -14,17 +14,19 @@ export interface InboundApprovalMessage {
 export interface IlinkTransport {
   login(onQRCode?: (value: string) => void): Promise<AccountData>
   poll(cursor: string): Promise<GetUpdatesResponse>
-  sendText(to: string, text: string, contextToken: string): Promise<void>
+  sendText(to: string, text: string, contextToken: string, idempotencyKey: string): Promise<void>
 }
 
 export class WeChatGateway {
   private running = false
-  private seen = new Set<string>()
+  private seen: Set<string>
 
   constructor(
     private readonly store: WeChatStore,
     private readonly transport: IlinkTransport,
-  ) {}
+  ) {
+    this.seen = new Set(store.loadProcessedMessageIDs())
+  }
 
   async initialize(): Promise<"ready" | "needs-binding"> {
     return this.store.loadAccount() && this.store.loadContext() ? "ready" : "needs-binding"
@@ -76,6 +78,7 @@ export class WeChatGateway {
       if (parsed.group || this.seen.has(parsed.message.messageID)) continue
 
       this.seen.add(parsed.message.messageID)
+      this.store.saveProcessedMessageIDs([...this.seen])
       if (parsed.contextToken) {
         this.store.saveContext({
           boundUserID: ownerID,
@@ -94,7 +97,12 @@ export class WeChatGateway {
     const context = this.store.loadContext()
     if (!context) throw new Error("微信尚未绑定，缺少通知上下文")
 
-    await this.transport.sendText(context.boundUserID, notification.text, context.contextToken)
+    await this.transport.sendText(
+      context.boundUserID,
+      notification.text,
+      context.contextToken,
+      notification.id,
+    )
     this.store.ackNotification(notification.id)
   }
 
