@@ -87,10 +87,11 @@ export class IlinkClientTransport implements IlinkTransport {
 
     const deadline = Date.now() + 480_000
     while (Date.now() < deadline) {
-      const raw = await this.fetchJSON(
-        `${ILINK_BASE}/ilink/bot/get_qrcode_status?qrcode=${encodeURIComponent(qr.qrcode)}`,
-      )
-      const status = raw as QRCodeStatus
+      const status = await this.fetchQRCodeStatus(qr.qrcode)
+      if (!status) {
+        await sleep(1_000)
+        continue
+      }
       if (status.status === "expired") throw new Error("微信二维码已过期")
       if (status.status === "confirmed") {
         if (!status.ilink_bot_id || !status.bot_token || !status.ilink_user_id) {
@@ -108,6 +109,18 @@ export class IlinkClientTransport implements IlinkTransport {
       await sleep(1_000)
     }
     throw new Error("微信二维码登录超时")
+  }
+
+  private async fetchQRCodeStatus(qrcode: string): Promise<QRCodeStatus | null> {
+    // 状态长轮询的单次网络超时只代表暂时无响应，继续等待二维码有效期。
+    try {
+      return (await this.fetchJSON(
+        `${ILINK_BASE}/ilink/bot/get_qrcode_status?qrcode=${encodeURIComponent(qrcode)}`,
+      )) as QRCodeStatus
+    } catch (error) {
+      if (isTimeout(error)) return null
+      throw error
+    }
   }
 
   async poll(cursor: string, signal?: AbortSignal): Promise<GetUpdatesResponse> {

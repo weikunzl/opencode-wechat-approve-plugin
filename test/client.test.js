@@ -141,3 +141,31 @@ test("uses a forced login account before its binding is committed", async () => 
     },
   ])
 })
+
+test("continues QR status polling after a transient timeout", async () => {
+  const store = new WeChatStore(mkdtempSync(join(tmpdir(), "wechat-client-")))
+  let statusCalls = 0
+  const transport = new IlinkClientTransport(store, async (url) => {
+    if (String(url).includes("get_bot_qrcode")) {
+      return Response.json({ qrcode: "qr", qrcode_img_content: "image" })
+    }
+    statusCalls++
+    if (statusCalls === 1) {
+      const error = new Error("temporary timeout")
+      error.name = "TimeoutError"
+      throw error
+    }
+    return Response.json({
+      status: "confirmed",
+      ilink_bot_id: "bot",
+      bot_token: "secret",
+      baseurl: "https://example.invalid",
+      ilink_user_id: "owner",
+    })
+  })
+
+  const account = await transport.login(undefined, true)
+
+  assert.equal(account.accountId, "bot")
+  assert.equal(statusCalls, 2)
+})
