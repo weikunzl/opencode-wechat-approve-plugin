@@ -1,0 +1,79 @@
+import assert from "node:assert/strict"
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import test from "node:test"
+
+import { doctorInstallation, parseOpenCodePaths, resolveEffectiveModel } from "../dist/cli.js"
+
+test("parses OpenCode paths containing Windows drive letters and spaces", () => {
+  const paths = parseOpenCodePaths(
+    [
+      "home       C:\\Users\\Jane Doe",
+      "config     C:\\Users\\Jane Doe\\AppData\\Roaming\\opencode",
+      "state      C:\\Users\\Jane Doe\\AppData\\Local\\opencode",
+    ].join("\r\n"),
+  )
+
+  assert.deepEqual(paths, {
+    home: "C:\\Users\\Jane Doe",
+    config: "C:\\Users\\Jane Doe\\AppData\\Roaming\\opencode",
+    state: "C:\\Users\\Jane Doe\\AppData\\Local\\opencode",
+  })
+})
+
+test("resolves the configured model before the most recently used model", () => {
+  assert.equal(
+    resolveEffectiveModel(
+      { model: "anthropic/claude-opus-4-7" },
+      { recent: [{ providerID: "opencode-go", modelID: "qwen3.7-max" }] },
+    ),
+    "anthropic/claude-opus-4-7",
+  )
+  assert.equal(
+    resolveEffectiveModel({}, { recent: [{ providerID: "opencode-go", modelID: "qwen3.7-max" }] }),
+    "opencode-go/qwen3.7-max",
+  )
+})
+
+test("doctor reports plugin binding model and central server independently", async () => {
+  const root = mkdtempSync(join(tmpdir(), "wechat-doctor-"))
+  const configFile = join(root, "opencode.jsonc")
+  const stateDirectory = join(root, "wechat-approve")
+  mkdirSync(stateDirectory)
+  writeFileSync(
+    configFile,
+    `{
+      "plugin": ["opencode-wechat-approve-plugin"],
+      "server": { "hostname": "127.0.0.1", "port": 4096 }
+    }`,
+  )
+  writeFileSync(
+    join(stateDirectory, "config.json"),
+    JSON.stringify({
+      model: "opencode-go/qwen3.7-max",
+      server: { hostname: "127.0.0.1", port: 4096 },
+      approvalTimeoutMs: 600000,
+      modelConfidenceThreshold: 0.85,
+    }),
+  )
+  writeFileSync(join(stateDirectory, "account.json"), '{"token":"x","baseUrl":"https://example","accountId":"bot"}')
+  writeFileSync(
+    join(stateDirectory, "context-v1.json"),
+    '{"boundUserID":"owner","contextToken":"x","updatedAt":1}',
+  )
+
+  const result = await doctorInstallation({
+    configFile,
+    stateDirectory,
+    availableModels: ["opencode-go/qwen3.7-max"],
+    fetcher: async () => new Response('{"healthy":true,"version":"1.18.2"}', { status: 200 }),
+  })
+
+  assert.deepEqual(result, {
+    plugin: { ok: true, detail: "configured" },
+    binding: { ok: true, detail: "bound" },
+    model: { ok: true, detail: "opencode-go/qwen3.7-max" },
+    server: { ok: true, detail: "OpenCode 1.18.2" },
+  })
+})
