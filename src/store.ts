@@ -1,5 +1,7 @@
 import fs from "node:fs"
+import os from "node:os"
 import path from "node:path"
+import { loadPluginConfig, type PluginConfig } from "./config.js"
 import type { ApprovalConversation, NotificationEnvelope, PendingApproval, SessionRunState, WeChatContext } from "./domain.js"
 import type { AccountData } from "./types.js"
 
@@ -12,7 +14,7 @@ export class WeChatStore {
   constructor(directory?: string) {
     this.dir =
       directory ??
-      path.join(process.env.HOME || process.env.USERPROFILE || "~", ".opencode", WECHAT_DATA_DIR_NAME)
+      path.join(os.homedir(), ".opencode", WECHAT_DATA_DIR_NAME)
     fs.mkdirSync(this.dir, { recursive: true, mode: 0o700 })
     this.loadLegacyContextTokens()
   }
@@ -23,6 +25,14 @@ export class WeChatStore {
 
   saveAccount(data: AccountData): void {
     this.atomicWrite("account.json", data)
+  }
+
+  loadPluginConfig(): PluginConfig {
+    return loadPluginConfig(this.readJSON<Record<string, unknown>>("config.json", {}, isRecord))
+  }
+
+  savePluginConfig(config: PluginConfig): void {
+    this.atomicWrite("config.json", config)
   }
 
   loadContext(): WeChatContext | null {

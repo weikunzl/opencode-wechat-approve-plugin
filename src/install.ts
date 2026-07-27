@@ -1,0 +1,90 @@
+import fs from "node:fs"
+import path from "node:path"
+import { applyEdits, modify, parse } from "jsonc-parser"
+import { loadPluginConfig } from "./config.js"
+import { WeChatStore } from "./store.js"
+
+export const PACKAGE_NAME = "opencode-wechat-approve-plugin"
+
+interface ConfigPatch {
+  plugin: string
+  hostname: string
+  port: number
+}
+
+interface InstallOptions {
+  configFile: string
+  store: WeChatStore
+  availableModels: string[]
+  configuredModel: string | null
+  confirmModel(model: string): Promise<boolean>
+  bind(): Promise<void>
+  sendTest(): Promise<boolean>
+  pluginName?: string
+  hostname?: string
+  port?: number
+}
+
+export function patchOpenCodeConfig(source: string, patch: ConfigPatch): string {
+  let output = source.trim() ? source : "{}\n"
+  const parsed = parse(output) as { plugin?: unknown } | undefined
+  const currentPlugins = Array.isArray(parsed?.plugin)
+    ? parsed.plugin.filter((item): item is string => typeof item === "string")
+    : []
+  const plugins = currentPlugins.includes(patch.plugin) ? currentPlugins : [...currentPlugins, patch.plugin]
+  const formattingOptions = { insertSpaces: true, tabSize: 2, eol: detectEOL(output) }
+
+  output = applyEdits(output, modify(output, ["plugin"], plugins, { formattingOptions }))
+  output = applyEdits(output, modify(output, ["server", "hostname"], patch.hostname, { formattingOptions }))
+  output = applyEdits(output, modify(output, ["server", "port"], patch.port, { formattingOptions }))
+  return output.endsWith(formattingOptions.eol) ? output : `${output}${formattingOptions.eol}`
+}
+
+export async function install(options: InstallOptions): Promise<void> {
+  const model = options.configuredModel
+  if (!model || !options.availableModels.includes(model)) {
+    throw new Error(`模型不可用: ${model || "未配置"}`)
+  }
+  if (!(await options.confirmModel(model))) throw new Error("用户未确认默认模型")
+
+  const source = fs.existsSync(options.configFile) ? fs.readFileSync(options.configFile, "utf8") : "{}\n"
+  const updated = patchOpenCodeConfig(source, {
+    plugin: options.pluginName ?? PACKAGE_NAME,
+    hostname: options.hostname ?? "127.0.0.1",
+    port: options.port ?? 4096,
+  })
+  atomicWriteText(options.configFile, updated)
+
+  await options.bind()
+  if (!options.store.loadAccount() || !options.store.loadContext()) {
+    throw new Error("未收到绑定消息（请发送“绑定”），无法完成微信绑定")
+  }
+  if (!(await options.sendTest())) throw new Error("微信测试通知发送失败")
+
+  options.store.savePluginConfig(
+    loadPluginConfig({
+      model,
+      server: {
+        hostname: options.hostname ?? "127.0.0.1",
+        port: options.port ?? 4096,
+      },
+    }),
+  )
+}
+
+function atomicWriteText(file: string, value: string): void {
+  fs.mkdirSync(path.dirname(file), { recursive: true })
+  const temporary = `${file}.${process.pid}.${Date.now()}.tmp`
+  const descriptor = fs.openSync(temporary, "w")
+  try {
+    fs.writeFileSync(descriptor, value, "utf8")
+    fs.fsyncSync(descriptor)
+  } finally {
+    fs.closeSync(descriptor)
+  }
+  fs.renameSync(temporary, file)
+}
+
+function detectEOL(value: string): "\r\n" | "\n" {
+  return value.includes("\r\n") ? "\r\n" : "\n"
+}
