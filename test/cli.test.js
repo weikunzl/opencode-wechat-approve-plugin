@@ -67,7 +67,11 @@ test("doctor reports plugin binding model and central server independently", asy
     configFile,
     stateDirectory,
     availableModels: ["opencode-go/qwen3.7-max"],
-    fetcher: async () => new Response('{"healthy":true,"version":"1.18.2"}', { status: 200 }),
+    authorization: "Basic protected",
+    fetcher: async (_input, init = {}) => {
+      assert.equal(new Headers(init.headers).get("authorization"), "Basic protected")
+      return new Response('{"healthy":true,"version":"1.18.2"}', { status: 200 })
+    },
   })
 
   assert.deepEqual(result, {

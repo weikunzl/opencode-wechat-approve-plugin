@@ -2,6 +2,7 @@ import fs from "node:fs"
 import path from "node:path"
 import { parse } from "jsonc-parser"
 import { PACKAGE_NAME } from "./install.js"
+import { openCodeAuthorization, openCodeHeaders } from "./server-auth.js"
 
 export interface OpenCodePaths {
   home?: string
@@ -51,6 +52,7 @@ export async function doctorInstallation(options: {
   stateDirectory: string
   availableModels: string[]
   fetcher?: typeof fetch
+  authorization?: string | null
 }): Promise<DoctorResult> {
   const globalConfig = readJSONC(options.configFile)
   const pluginConfig = readJSONC(path.join(options.stateDirectory, "config.json"))
@@ -94,7 +96,13 @@ export async function doctorInstallation(options: {
   try {
     const response = await (options.fetcher ?? fetch)(
       new URL("/global/health", `http://${formatHost(hostname)}:${port}`),
-      { signal: AbortSignal.timeout(3_000) },
+      {
+        headers: openCodeHeaders(
+          undefined,
+          options.authorization ?? openCodeAuthorization(),
+        ),
+        signal: AbortSignal.timeout(3_000),
+      },
     )
     const body = asRecord(await response.json())
     server =

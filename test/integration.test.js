@@ -89,6 +89,30 @@ function request(id, project = "/workspace/docs", pattern = "npm test") {
   }
 }
 
+test("permission list and reply authenticate to a protected OpenCode server", async () => {
+  const store = new WeChatStore(mkdtempSync(join(tmpdir(), "wechat-auth-")))
+  const authorization = "Basic protected"
+  const requests = []
+  const api = new HttpPermissionAPI(
+    new URL("http://127.0.0.1:4096"),
+    store,
+    600_000,
+    async (_input, init = {}) => {
+      requests.push(init)
+      return Response.json((init.method ?? "GET") === "GET" ? [] : true)
+    },
+    authorization,
+  )
+
+  await api.list()
+  await api.reply("req-1", "once")
+
+  assert.deepEqual(
+    requests.map((init) => new Headers(init.headers).get("authorization")),
+    [authorization, authorization],
+  )
+})
+
 for (const [phrase, reply] of [
   ["好的", "once"],
   ["始终允许", "always"],

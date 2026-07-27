@@ -1,19 +1,23 @@
 import type { PendingApproval } from "./domain.js"
 import { validateModelIntent, type ApprovalIntent } from "./model-interpreter.js"
+import { openCodeAuthorization, openCodeHeaders } from "./server-auth.js"
 
 interface ModelOptions {
   serverURL: URL
   directory: string
   model: string
   fetcher?: typeof fetch
+  authorization?: string | null
   onInternalSession?: (sessionID: string, active: boolean) => void
 }
 
 export class OpenCodeApprovalModel {
   private readonly fetcher: typeof fetch
+  private readonly authorization: string | null
 
   constructor(private readonly options: ModelOptions) {
     this.fetcher = options.fetcher ?? fetch
+    this.authorization = options.authorization ?? openCodeAuthorization()
   }
 
   async interpret(
@@ -94,7 +98,10 @@ export class OpenCodeApprovalModel {
     url.searchParams.set("directory", this.options.directory)
     const response = await this.fetcher(url, {
       method: options.method,
-      headers: options.body === undefined ? undefined : { "content-type": "application/json" },
+      headers: openCodeHeaders(
+        options.body === undefined ? undefined : { "content-type": "application/json" },
+        this.authorization,
+      ),
       body: options.body === undefined ? undefined : JSON.stringify(options.body),
       signal: AbortSignal.timeout(30_000),
     })

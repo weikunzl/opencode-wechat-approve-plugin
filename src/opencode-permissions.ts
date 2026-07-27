@@ -1,4 +1,5 @@
 import type { PendingApproval } from "./domain.js"
+import { openCodeAuthorization, openCodeHeaders } from "./server-auth.js"
 import { WeChatStore } from "./store.js"
 
 export interface PermissionAPI {
@@ -24,10 +25,12 @@ export class HttpPermissionAPI implements PermissionAPI {
     private readonly store: WeChatStore,
     private readonly timeoutMs: number,
     private readonly fetcher: typeof fetch = fetch,
+    private readonly authorization: string | null = openCodeAuthorization(),
   ) {}
 
   async list(): Promise<PendingApproval[]> {
     const response = await this.fetcher(new URL("/permission", this.serverURL), {
+      headers: openCodeHeaders(undefined, this.authorization),
       signal: AbortSignal.timeout(10_000),
     })
     if (!response.ok) throw new Error(`OpenCode permission list failed: HTTP ${response.status}`)
@@ -66,7 +69,7 @@ export class HttpPermissionAPI implements PermissionAPI {
   async reply(requestID: string, decision: "once" | "always" | "reject"): Promise<boolean> {
     const response = await this.fetcher(new URL(`/permission/${encodeURIComponent(requestID)}/reply`, this.serverURL), {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: openCodeHeaders({ "content-type": "application/json" }, this.authorization),
       body: JSON.stringify({ reply: decision }),
       signal: AbortSignal.timeout(10_000),
     })

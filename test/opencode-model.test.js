@@ -21,7 +21,12 @@ test("uses a temporary tool-disabled structured session and deletes it", async (
   const internal = new Set()
   const fetcher = async (input, init = {}) => {
     const url = String(input)
-    requests.push({ url, method: init.method ?? "GET", body: init.body ? JSON.parse(init.body) : null })
+    requests.push({
+      url,
+      method: init.method ?? "GET",
+      headers: init.headers,
+      body: init.body ? JSON.parse(init.body) : null,
+    })
     if (new URL(url).pathname === "/session") {
       return new Response('{"id":"ses-internal"}', { status: 200 })
     }
@@ -47,6 +52,7 @@ test("uses a temporary tool-disabled structured session and deletes it", async (
     serverURL: new URL("http://127.0.0.1:4096"),
     directory: "C:\\workspace\\docs",
     model: "opencode-go/qwen3.7-max",
+    authorization: "Basic protected",
     fetcher,
     onInternalSession: (id, active) => {
       if (active) internal.add(id)
@@ -59,6 +65,10 @@ test("uses a temporary tool-disabled structured session and deletes it", async (
   assert.equal(result.decision, "once")
   assert.deepEqual(result.requestIDs, ["req-1"])
   assert.equal(requests[0].method, "POST")
+  assert.equal(
+    requests.every((request) => new Headers(request.headers).get("authorization") === "Basic protected"),
+    true,
+  )
   assert.deepEqual(requests[1].body.model, {
     providerID: "opencode-go",
     modelID: "qwen3.7-max",
