@@ -203,7 +203,6 @@ export class SessionNotifier {
             () => reject(new Error("session metadata lookup timed out")),
             this.metadataTimeoutMs,
           )
-          timeout.unref()
         }),
       ])
       return {
