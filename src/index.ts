@@ -66,7 +66,11 @@ export function createPluginRuntime(dependencies: {
   gateway: RuntimeGateway
   approvalManager: RuntimeApprovalManager
   sessionNotifier: RuntimeSessionNotifier
-  lease?: { acquire(): boolean; release(): void }
+  lease?: {
+    acquire(): boolean
+    release(): void
+    setOnLost?(callback: () => void): void
+  }
   timers?: Partial<RuntimeTimers>
 }) {
   const { gateway, approvalManager, sessionNotifier, lease } = dependencies
@@ -84,6 +88,24 @@ export function createPluginRuntime(dependencies: {
   let active = false
   let startupTimer: unknown = null
   let expiryTimer: unknown = null
+  let deactivation: Promise<void> | null = null
+
+  const deactivate = (releaseLease: boolean): Promise<void> => {
+    if (deactivation) return deactivation
+    deactivation = (async () => {
+      active = false
+      if (startupTimer !== null) timers.clearTimeout(startupTimer)
+      startupTimer = null
+      if (expiryTimer !== null) timers.clearInterval(expiryTimer)
+      expiryTimer = null
+      await gateway.stop?.()
+      if (releaseLease) lease?.release()
+    })()
+    return deactivation
+  }
+  lease?.setOnLost?.(() => {
+    void deactivate(false)
+  })
 
   const deliver = async (notifications: NotificationEnvelope[]): Promise<void> => {
     for (const notification of notifications) {
@@ -98,13 +120,7 @@ export function createPluginRuntime(dependencies: {
   const hooks = {
     event: async ({ event }: { event: EventLike }): Promise<void> => {
       if (event.type === "global.disposed" || event.type === "server.instance.disposed") {
-        active = false
-        if (startupTimer !== null) timers.clearTimeout(startupTimer)
-        startupTimer = null
-        if (expiryTimer !== null) timers.clearInterval(expiryTimer)
-        expiryTimer = null
-        await gateway.stop?.()
-        lease?.release()
+        await deactivate(true)
         return
       }
       if (!active) return

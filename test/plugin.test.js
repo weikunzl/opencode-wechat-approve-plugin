@@ -186,3 +186,35 @@ test("startup does not wait for OpenCode permission reconciliation", async () =>
   finishReconcile([])
   await reconciliation
 })
+
+test("stops the gateway immediately when the runtime lease is lost", async () => {
+  const gateway = createGateway()
+  let stopped = false
+  let onLost
+  gateway.stop = async () => {
+    stopped = true
+  }
+  const runtime = createPluginRuntime({
+    gateway,
+    approvalManager: {
+      reconcile: async () => [],
+      onPermissionAsked: async () => [],
+      onPermissionReplied: async () => {},
+      onMessage: async () => [],
+    },
+    sessionNotifier: { handle: async () => [] },
+    lease: {
+      acquire: () => true,
+      release: () => {},
+      setOnLost: (callback) => {
+        onLost = callback
+      },
+    },
+  })
+  await runtime.start()
+
+  onLost()
+  await new Promise((resolve) => setImmediate(resolve))
+
+  assert.equal(stopped, true)
+})
