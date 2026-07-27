@@ -8,7 +8,7 @@ const NEGATED_APPROVAL =
   /(?:不能|不可|不准|无法|禁止|别|勿|未|没|不要|莫|暂缓|暂停|停止).{0,6}(?:确认|同意|允许|通过|授权|执行)|(?:do\s+not|don't|cannot|can't|never)\s+(?:allow|approve|confirm|execute)/
 const NEGATIVE_MODALITY =
   /(?:不|别|勿|未|没|无|禁止|拒绝|取消|否|停止|暂停|暂缓|不能|不可|不准|甭|莫)|(?:^|[^a-z])(?:not|never|cannot|can't|don't|without)(?:$|[^a-z])/
-const ALWAYS = /allow\s*all|always|始终允许|永久允许|以后都允许|全部授权|全部始终|都始终允许/
+const ALWAYS = /allow\s*all|always|始终允许|永久允许|以后都允许|全部授权|全部允许|全部都允许|全部始终|都始终允许/
 const ONCE = /(?:^|[^a-z])(ok|okay|yes|y|allow|approve)(?:$|[^a-z])|好的|好啊|可以|是的|确认|同意|允许|通过/
 
 export function interpretDeterministic(

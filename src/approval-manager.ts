@@ -100,7 +100,7 @@ export class ApprovalManager {
           `Session: ${approval.sessionID}`,
           `Permission: ${approval.permission}`,
           approval.patterns.length ? `Action: ${approval.patterns.join(", ").slice(0, 400)}` : "",
-          "请回复“好的”“始终允许”或“拒绝”。",
+          "请回复“好的”“全部允许”“始终允许”或“拒绝”。",
         ]
           .filter(Boolean)
           .join("\n"),

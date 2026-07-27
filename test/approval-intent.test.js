@@ -22,6 +22,8 @@ test("maps clear one-request synonyms without a model", () => {
   assert.equal(interpretDeterministic("好的", pending).decision, "once")
   assert.equal(interpretDeterministic("OK", pending).decision, "once")
   assert.equal(interpretDeterministic("全部授权", pending).decision, "always")
+  assert.equal(interpretDeterministic("全部允许", pending).decision, "always")
+  assert.equal(interpretDeterministic("全部都允许", pending).decision, "always")
   assert.equal(interpretDeterministic("allow all", pending).decision, "always")
   assert.equal(interpretDeterministic("不要，拒绝", pending).decision, "reject")
 })
