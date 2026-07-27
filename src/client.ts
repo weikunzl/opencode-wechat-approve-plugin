@@ -22,17 +22,16 @@ interface QRCodeStatus {
 }
 
 export class IlinkClientTransport implements IlinkTransport {
-  private account: AccountData | null
+  private pendingLoginAccount: AccountData | null = null
 
   constructor(
     private readonly store: WeChatStore,
     private readonly fetcher: typeof fetch = fetch,
-  ) {
-    this.account = store.loadAccount()
-  }
+  ) {}
 
   async login(onQRCode?: (value: string) => void, force = false): Promise<AccountData> {
-    if (this.account && !force) return this.account
+    const storedAccount = this.store.loadAccount()
+    if (storedAccount && !force) return storedAccount
 
     const response = await this.fetchJSON(
       `${ILINK_BASE}/ilink/bot/get_bot_qrcode?bot_type=${encodeURIComponent(BOT_TYPE)}`,
@@ -52,14 +51,14 @@ export class IlinkClientTransport implements IlinkTransport {
         if (!status.ilink_bot_id || !status.bot_token || !status.ilink_user_id) {
           throw new Error("微信登录确认响应缺少账号、令牌或用户标识")
         }
-        this.account = {
+        this.pendingLoginAccount = {
           token: status.bot_token,
           baseUrl: status.baseurl || ILINK_BASE,
           accountId: status.ilink_bot_id,
           userId: status.ilink_user_id,
           savedAt: new Date().toISOString(),
         }
-        return this.account
+        return this.pendingLoginAccount
       }
       await sleep(1_000)
     }
@@ -107,7 +106,15 @@ export class IlinkClientTransport implements IlinkTransport {
   }
 
   private async apiCall(endpoint: string, body: object, timeoutMs = 15_000): Promise<unknown> {
-    const account = this.account ?? this.store.loadAccount()
+    const storedAccount = this.store.loadAccount()
+    if (
+      this.pendingLoginAccount &&
+      storedAccount?.accountId === this.pendingLoginAccount.accountId &&
+      storedAccount.token === this.pendingLoginAccount.token
+    ) {
+      this.pendingLoginAccount = null
+    }
+    const account = this.pendingLoginAccount ?? storedAccount
     if (!account) throw new Error("微信尚未登录")
 
     const bodyText = JSON.stringify(body)
