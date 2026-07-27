@@ -140,6 +140,35 @@ test("keeps a failed outbound notification queued for retry", async () => {
   assert.deepEqual(store.loadOutbox(), [notification])
 })
 
+test("retries the durable outbox while the gateway remains running", async () => {
+  const { store } = harness()
+  let attempts = 0
+  let fail = true
+  const gateway = new WeChatGateway(store, {
+    login: async () => {
+      throw new Error("not expected")
+    },
+    poll: async () => ({ ret: 0, msgs: [], get_updates_buf: "next" }),
+    sendText: async () => {
+      attempts += 1
+      if (fail) throw new Error("temporary failure")
+    },
+  })
+  const notification = {
+    id: "notice-live-retry",
+    kind: "done",
+    text: "任务完成",
+    createdAt: 1,
+  }
+  await assert.rejects(gateway.send(notification), /temporary failure/)
+  fail = false
+
+  await gateway.pollOnce(async () => {})
+
+  assert.equal(attempts, 2)
+  assert.deepEqual(store.loadOutbox(), [])
+})
+
 test("redacts credentials and bounds every outbound WeChat notification", async () => {
   const { gateway, sent } = harness()
 

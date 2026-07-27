@@ -97,6 +97,9 @@ export class WeChatGateway {
 
       await onMessage(parsed.message)
     }
+    if (!binding && this.store.loadOutbox().length > 0) {
+      await this.flushOutbox()
+    }
   }
 
   async send(notification: NotificationEnvelope): Promise<void> {
