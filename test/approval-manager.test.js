@@ -74,7 +74,7 @@ test("applies all-request decisions for Chinese and English all forms", async ()
     ["全部 reject", "reject"],
     ["all allow", "once"],
   ]) {
-    const { manager, replies } = harness([request("r1", 1), request("r2", 2)])
+    const { manager, replies, api } = harness([request("r1", 1), request("r2", 2)])
 
     await manager.onMessage(message(text))
 
@@ -82,6 +82,7 @@ test("applies all-request decisions for Chinese and English all forms", async ()
       ["r1", decision],
       ["r2", decision],
     ], text)
+    assert.deepEqual(api.pending, [], text)
   }
 })
 
@@ -184,7 +185,7 @@ test("applies mixed ordinal decisions in created-at order", async () => {
 })
 
 test("asks for the remaining request after a partial decision", async () => {
-  const { manager, replies } = harness([request("r1", 1), request("r2", 2)])
+  const { manager, replies, api } = harness([request("r1", 1), request("r2", 2)])
 
   const notices = await manager.onMessage(message("第一个允许"))
 
@@ -197,6 +198,7 @@ test("asks for the remaining request after a partial decision", async () => {
     ["r1", "once"],
     ["r2", "reject"],
   ])
+  assert.deepEqual(api.pending, [])
 })
 
 test("queues a new approval notification before returning it", async () => {

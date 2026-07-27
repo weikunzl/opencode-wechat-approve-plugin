@@ -75,6 +75,19 @@ test("maps a natural single-request paraphrase to once", async () => {
   })
 })
 
+test("does not let a target-only paraphrase establish authorization", async () => {
+  // 模型可以解释目标，但没有明确授权词时不能自行生成 once。
+  const result = await interpret("把那个执行一下", {
+    requestIDs: ["r1"],
+    decision: "once",
+    confidence: 0.99,
+    explanation: "模型猜测用户想执行",
+  }, SINGLE_PENDING_APPROVALS)
+
+  assert.equal(result.decision, "clarify")
+  assert.deepEqual(result.requestIDs, [])
+})
+
 test("maps a natural multi-request target paraphrase to one request", async () => {
   // 多请求转述只能授权模型明确返回的目标，不能顺带授权其他请求。
   const result = await interpret("docs 项目的 npm test 可以先放行", {

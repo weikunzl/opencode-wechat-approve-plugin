@@ -10,7 +10,15 @@ const NODE_EXECUTABLE = process.execPath
 const NPM_EXECUTABLE = process.platform === "win32" ? "npm.cmd" : "npm"
 const LIVE_CONFIRMATION = "LIVE"
 const TARGET_TITLE = "微信ClawBot"
-const SCENARIOS = ["E2E-05", "E2E-06", "E2E-07"]
+const DECISIONS = new Set(["once", "always", "reject"])
+const SCENARIOS = [
+  ["LIVE-01", "全部允许 → once"],
+  ["LIVE-02", "全部始终允许/always/授权 → always"],
+  ["LIVE-03", "全部拒绝 → reject"],
+  ["LIVE-04", "第一个允许、第二个拒绝按创建时间"],
+  ["LIVE-05", "第一个允许后继续询问第二个"],
+  ["LIVE-06", "自然语言转述调用真实模型"],
+]
 
 function ask(reader, question) {
   // 任何真实读写前都要求操作者确认目标会话标题。
@@ -41,18 +49,42 @@ function assertSafe(value, label) {
   }
 }
 
+function parsePendingCount(value, label) {
+  // pending 数量只接受短的非负整数，防止把日志或凭据写入记录。
+  if (!/^\d{1,4}$/.test(value)) throw new Error(`${label} 必须是非负整数`)
+  return Number(value)
+}
+
+function parseDecisions(value, label) {
+  // 逐项保留 request ID 与最终决策，但不接受 token 或任意结构化负载。
+  const entries = value.split(",").map((item) => item.trim()).filter(Boolean)
+  if (entries.length === 0) throw new Error(`${label} 至少需要一项 requestID=decision`)
+  return entries.map((entry) => {
+    const parts = entry.split("=")
+    const requestID = parts[0]?.trim() ?? ""
+    const decision = parts[1]?.trim() ?? ""
+    if (parts.length !== 2 || !/^[\w.:-]+$/.test(requestID) || !DECISIONS.has(decision)) {
+      throw new Error(`${label} 必须使用 requestID=once|always|reject`)
+    }
+    return { requestID, decision }
+  })
+}
+
 async function collectScenario(reader, scenario, scanTime) {
   // 每个场景都重新确认标题，并只在内存中保留脱敏验收摘要。
-  const title = await ask(reader, `${scenario} 开始前输入可见会话标题（必须为 ${TARGET_TITLE}）：`)
-  if (title.trim() !== TARGET_TITLE) throw new Error(`${scenario} 会话标题不匹配，已停止`)
-  const observedText = (await ask(reader, `${scenario} 输入观察到的微信文本摘要（不得输入 token）：`)).trim()
-  const requestID = (await ask(reader, `${scenario} 输入 request ID（可留空，不得输入 token）：`)).trim()
-  assertSafe(observedText, `${scenario} 微信文本`)
-  assertSafe(requestID, `${scenario} request ID`)
-  if (requestID && /[^\w.:-]/.test(requestID)) {
-    throw new Error(`${scenario} request ID 含不安全字符，已停止记录`)
-  }
-  return { scanTime, scenario, observedText, requestID }
+  const [scenarioID, description] = scenario
+  const title = await ask(reader, `${scenarioID} ${description}；输入可见会话标题（必须为 ${TARGET_TITLE}）：`)
+  if (title.trim() !== TARGET_TITLE) throw new Error(`${scenarioID} 会话标题不匹配，已停止`)
+  const observedText = (await ask(reader, `${scenarioID} 输入观察到的微信文本摘要（不得输入 token）：`)).trim()
+  const decisionText = (await ask(reader, `${scenarioID} 输入 requestID=decision 列表（逗号分隔）：`)).trim()
+  const pendingBeforeText = (await ask(reader, `${scenarioID} 输入处理前 pending 数量：`)).trim()
+  const pendingAfterText = (await ask(reader, `${scenarioID} 输入处理后 pending 数量：`)).trim()
+  assertSafe(observedText, `${scenarioID} 微信文本`)
+  assertSafe(decisionText, `${scenarioID} 决策记录`)
+  const decisions = parseDecisions(decisionText, scenarioID)
+  const pendingBefore = parsePendingCount(pendingBeforeText, `${scenarioID} 处理前 pending`)
+  const pendingAfter = parsePendingCount(pendingAfterText, `${scenarioID} 处理后 pending`)
+  return { scanTime, scenario: scenarioID, description, observedText, decisions, pendingBefore, pendingAfter }
 }
 
 async function main() {

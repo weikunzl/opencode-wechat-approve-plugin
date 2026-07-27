@@ -30,11 +30,20 @@ CI runs the same suite on Windows, macOS and Linux with Node.js 20.
 npm run test:e2e:live
 ```
 
-该入口是扫码后的人工安全记录器，不会自动触发 OpenCode E2E-05/06/07，也不会代替真实会话断言。它每次先强制 bind，显示二维码并要求用户扫码确认；随后操作者必须在会话标题为 `微信ClawBot` 的窗口发送精确文本 `绑定`。脚本确认新的 context 已收到后，才提示人工执行 E2E-05、E2E-06、E2E-07。每个场景开始前都重新确认标题，并记录扫码时间、场景、观察到的微信文本和 request ID；不得记录 token、二维码或本地状态文件。
+该入口是扫码后的人工安全记录器，不会自动触发 OpenCode E2E，也不会代替真实会话断言。它每次先强制 bind，显示二维码并要求用户扫码确认；随后操作者必须在会话标题为 `微信ClawBot` 的窗口发送精确文本 `绑定`。脚本确认新的 context 已收到后，才提示人工执行 LIVE-01 至 LIVE-06。每个场景开始前都重新确认标题，并记录扫码时间、场景、微信文本、`requestID=decision` 列表和 pending 前后数量；不得记录 token、二维码或本地状态文件。
 
 ## Real WeChat acceptance
 
-本轮真实证据仅包含：已在标题为 `微信ClawBot` 的会话中观察到一次真实 `[Done] E2E approval once`。E2E-05 的失败/取消会话、E2E-06 的 Cancelled/timeout 展示、E2E-07 的 `好的`/`始终允许`/`拒绝` 三种真实回复均为“未验证”。后续 OpenCode→微信链路因微信 API 返回 `prepare failed` 中断，不能用 fake gateway、fake PermissionAPI 或自动化测试替代这些证据。
+registry 包 `@wekux/opencode-wechat-approve-plugin@1.0.2` 已在标题严格为 `微信ClawBot` 的真实会话中完成主要审批链路。观察记录如下（不含 token/context）：
+
+- `全部允许`：`per_fa4506c3a001muJmveGeWrt2KD`、`per_fa4506daa0018WsGNQoqTdvHDl` 均为 once，pending `2 → 0`。
+- `全部授权`：`per_fa457b954001S6CdsB3ZcQFtdr`、`per_fa457bad6001i3wBoUlIu0MpRA` 均为 always，pending `2 → 0`。
+- `全部拒绝`：`per_fa455d0da001GDf359IoVzMzM1`、`per_fa455d1c8001qxcDJykBvYqgSd` 均为 reject，pending `2 → 0`。
+- `第一个允许、第二个拒绝`：按 createdAt `1785169014898 < 1785169015145` 映射为 once/reject，pending `2 → 0`。
+- `第一个允许` 后微信继续询问 #2，再发 `第二个拒绝`，pending `2 → 1 → 0`。
+- 真实配置模型对“请把查看最近提交记录这个操作放行一次”返回唯一 request 的 once，pending `1 → 0`。
+
+真实未验证：Cancelled、失败 Error、重启后的微信去重/outbox 恢复、跨目录 attach，以及模型对模糊/否定/疑问语句的安全拒绝。此前未及时回复的一批真实通知显示 `[Timeout] #1, #2 已自动拒绝`，只作为 timeout 观察。fake gateway、fake PermissionAPI 和 fake model 仅属于自动化证据，不能替代上述缺口。
 
 The following desktop-automation restriction applies only to the maintainer's
 acceptance machine. Before every read or send, the driver must verify that the
@@ -44,7 +53,7 @@ mismatch and must not inspect or interact with another conversation.
 1. Run `npx @wekux/opencode-wechat-approve-plugin install`.
 2. Confirm an available provider/model.
 3. Scan the QR code, send `绑定`, and receive the test notification.
-4. Start `opencode web` and confirm `doctor` is fully green.
+4. Start `opencode web` and confirm `doctor` is fully green（本轮已验证 plugin、binding、model、server 四项 OK）。
 5. Attach two project directories to `http://127.0.0.1:4096`.
 6. Complete one real session and verify title, Session ID and project.
 7. Fail one session and verify exactly one Error and no later Done.
@@ -58,6 +67,12 @@ mismatch and must not inspect or interact with another conversation.
 
 Record the OpenCode permission request ID, reply payload and resulting WeChat
 text for each approval case. Never record bot tokens or context tokens.
+
+The live recorder does not create approvals or call OpenCode. The maintainer must
+create the requests manually, send the exact Chinese/English reply for the
+scenario, observe the WeChat text, inspect the OpenCode request IDs and pending
+count, and enter only the redacted summary. Model target interpretation without
+an explicit user decision remains unverified in real OpenCode.
 
 If `sendmessage` reports `prepare failed`, record only the redacted `ret`,
 `errcode`, `errmsg`, `baseHost`, account/target summaries and context age. Do
