@@ -20,3 +20,16 @@ export function formatError(error: unknown): string {
 
   return String(error || "Unknown error")
 }
+
+export function sanitizeNotificationText(text: string, limit = 1_800): string {
+  const redacted = text
+    .replace(/\bBearer\s+[^\s,;}\]]+/gi, "Bearer [REDACTED]")
+    .replace(
+      /\b(authorization|api[_-]?key|access[_-]?token|context[_-]?token|password|passwd|secret)\b(\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\s,;}\]]+)/gi,
+      "$1$2[REDACTED]",
+    )
+    .replace(/\b(?:gh[opsu]_[A-Za-z0-9]{20,}|sk-[A-Za-z0-9_-]{20,})\b/g, "[REDACTED]")
+  if (redacted.length <= limit) return redacted
+  const suffix = "\n…[truncated]"
+  return `${redacted.slice(0, Math.max(0, limit - suffix.length))}${suffix}`
+}

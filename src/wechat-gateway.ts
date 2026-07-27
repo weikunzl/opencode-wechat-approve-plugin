@@ -1,5 +1,6 @@
 import crypto from "node:crypto"
 import type { NotificationEnvelope } from "./domain.js"
+import { sanitizeNotificationText } from "./notification-utils.js"
 import { WeChatStore } from "./store.js"
 import type { AccountData, GetUpdatesResponse, WeChatMessage } from "./types.js"
 import { MSG_ITEM_TEXT, MSG_STATE_FINISH, MSG_TYPE_USER } from "./types.js"
@@ -99,17 +100,21 @@ export class WeChatGateway {
   }
 
   async send(notification: NotificationEnvelope): Promise<void> {
-    this.store.enqueueNotification(notification)
+    const safeNotification = {
+      ...notification,
+      text: sanitizeNotificationText(notification.text),
+    }
+    this.store.enqueueNotification(safeNotification)
     const context = this.store.loadContext()
     if (!context) throw new Error("微信尚未绑定，缺少通知上下文")
 
     await this.transport.sendText(
       context.boundUserID,
-      notification.text,
+      safeNotification.text,
       context.contextToken,
-      notification.id,
+      safeNotification.id,
     )
-    this.store.ackNotification(notification.id)
+    this.store.ackNotification(safeNotification.id)
   }
 
   async flushOutbox(): Promise<void> {

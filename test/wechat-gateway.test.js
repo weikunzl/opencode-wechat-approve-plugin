@@ -140,6 +140,21 @@ test("keeps a failed outbound notification queued for retry", async () => {
   assert.deepEqual(store.loadOutbox(), [notification])
 })
 
+test("redacts credentials and bounds every outbound WeChat notification", async () => {
+  const { gateway, sent } = harness()
+
+  await gateway.send({
+    id: "notice-sensitive",
+    kind: "error",
+    text: `Authorization: Bearer top-secret\nAPI_KEY=private-value\n${"x".repeat(3_000)}`,
+    createdAt: 1,
+  })
+
+  assert.doesNotMatch(sent[0].text, /top-secret|private-value/)
+  assert.match(sent[0].text, /\[REDACTED\]/)
+  assert.ok(sent[0].text.length <= 1_800)
+})
+
 test("deduplicates an inbound message after a process restart", async () => {
   const { batches, gateway, store } = harness()
   const messages = []
