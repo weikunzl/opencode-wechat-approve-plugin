@@ -118,51 +118,6 @@ export class WeChatStore {
     if (cursor && !fs.existsSync(path.join(this.dir, "cursor.json"))) this.saveCursor(cursor)
   }
 
-  // Compatibility adapters retained until the transport rewrite is complete.
-  loadCredentials(): AccountData | null {
-    return this.loadAccount()
-  }
-
-  saveCredentials(data: AccountData): void {
-    this.saveAccount(data)
-  }
-
-  cacheContext(senderId: string, token: string): void {
-    this.ctxTokens.set(senderId, token)
-    this.saveContext({ boundUserID: senderId, contextToken: token, updatedAt: Date.now() })
-  }
-
-  getContext(senderId: string): string | null {
-    const context = this.loadContext()
-    if (context?.boundUserID === senderId) return context.contextToken
-    return this.ctxTokens.get(senderId) ?? null
-  }
-
-  getLastContextTarget(): string | null {
-    return this.loadContext()?.boundUserID ?? [...this.ctxTokens.keys()].at(-1) ?? null
-  }
-
-  get getUpdatesBuf(): string {
-    return this.loadCursor()
-  }
-
-  set getUpdatesBuf(value: string) {
-    this.saveCursor(value)
-  }
-
-  getPromptModel(): string | null {
-    const config = this.readJSON<Record<string, unknown>>("config.json", {}, isRecord)
-    return typeof config.model === "string" ? config.model : null
-  }
-
-  getSessionID(): string | null {
-    return null
-  }
-
-  setSessionID(_id: string): void {}
-
-  clearSessionID(): void {}
-
   private loadLegacyContextTokens(): void {
     const file = path.join(this.dir, "context.json")
     try {

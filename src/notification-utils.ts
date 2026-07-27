@@ -20,18 +20,3 @@ export function formatError(error: unknown): string {
 
   return String(error || "Unknown error")
 }
-
-export class SessionNotificationState {
-  private failedSessions = new Set<string>()
-
-  markFailed(sessionID: string): boolean {
-    if (this.failedSessions.has(sessionID)) return false
-    this.failedSessions.add(sessionID)
-    return true
-  }
-
-  shouldNotifyDone(sessionID: string): boolean {
-    if (!this.failedSessions.delete(sessionID)) return true
-    return false
-  }
-}

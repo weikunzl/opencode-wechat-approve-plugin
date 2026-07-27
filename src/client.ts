@@ -1,96 +1,93 @@
 import crypto from "node:crypto"
-import fs from "node:fs"
-import path from "node:path"
-import type { AccountData, WeChatMessage, GetUpdatesResponse } from "./types.js"
-
-interface UploadUrlResponse {
-  upload_url?: string
-  media_id?: string
-  ret?: number
-  errmsg?: string
-}
+import type { AccountData, GetUpdatesResponse } from "./types.js"
+import { MSG_ITEM_TEXT, MSG_STATE_FINISH, MSG_TYPE_BOT } from "./types.js"
+import type { IlinkTransport } from "./wechat-gateway.js"
 import { WeChatStore } from "./store.js"
-import { parseMessage, formatForAI } from "./message.js"
-import { MSG_TYPE_USER, MSG_TYPE_BOT, MSG_STATE_FINISH, MSG_ITEM_TEXT, MSG_ITEM_IMAGE } from "./types.js"
 
 const ILINK_BASE = "https://ilinkai.weixin.qq.com"
 const BOT_TYPE = "3"
 const LONG_POLL_TIMEOUT_MS = 35_000
 
-export class WeChatClient {
-  private account: AccountData | null = null
-  private polling = false
-  private notificationTarget: string | null = null
-  private onMessageCallback: ((prompt: string, senderId: string, contextToken: string | null) => Promise<void>) | null =
-    null
+interface QRCodeResponse {
+  qrcode?: string
+  qrcode_img_content?: string
+}
 
-  constructor(private store: WeChatStore) {}
+interface QRCodeStatus {
+  status?: "wait" | "scaned" | "confirmed" | "expired"
+  bot_token?: string
+  ilink_bot_id?: string
+  baseurl?: string
+  ilink_user_id?: string
+}
 
-  async init(): Promise<boolean> {
-    this.account = this.store.loadCredentials()
-    if (!this.account) {
-      this.account = await this.qrLogin()
-      if (!this.account) return false
+export class IlinkClientTransport implements IlinkTransport {
+  private account: AccountData | null
+
+  constructor(
+    private readonly store: WeChatStore,
+    private readonly fetcher: typeof fetch = fetch,
+  ) {
+    this.account = store.loadAccount()
+  }
+
+  async login(onQRCode?: (value: string) => void): Promise<AccountData> {
+    if (this.account) return this.account
+
+    const response = await this.fetchJSON(
+      `${ILINK_BASE}/ilink/bot/get_bot_qrcode?bot_type=${encodeURIComponent(BOT_TYPE)}`,
+    )
+    const qr = response as QRCodeResponse
+    if (!qr.qrcode || !qr.qrcode_img_content) throw new Error("微信二维码响应无效")
+    onQRCode?.(qr.qrcode_img_content)
+
+    const deadline = Date.now() + 480_000
+    while (Date.now() < deadline) {
+      const raw = await this.fetchJSON(
+        `${ILINK_BASE}/ilink/bot/get_qrcode_status?qrcode=${encodeURIComponent(qr.qrcode)}`,
+      )
+      const status = raw as QRCodeStatus
+      if (status.status === "expired") throw new Error("微信二维码已过期")
+      if (status.status === "confirmed") {
+        if (!status.ilink_bot_id || !status.bot_token || !status.ilink_user_id) {
+          throw new Error("微信登录确认响应缺少账号、令牌或用户标识")
+        }
+        this.account = {
+          token: status.bot_token,
+          baseUrl: status.baseurl || ILINK_BASE,
+          accountId: status.ilink_bot_id,
+          userId: status.ilink_user_id,
+          savedAt: new Date().toISOString(),
+        }
+        return this.account
+      }
+      await sleep(1_000)
     }
-    console.log(`[wechat] 使用已保存账号: ${this.account.accountId}`)
-    const savedTarget = this.store.getLastContextTarget()
-    if (savedTarget) {
-      this.notificationTarget = savedTarget
-      console.log(`[wechat] 已恢复通知目标: ${savedTarget}`)
-    }
-    return true
+    throw new Error("微信二维码登录超时")
   }
 
-  onMessage(callback: (prompt: string, senderId: string, contextToken: string | null) => Promise<void>): void {
-    this.onMessageCallback = callback
-  }
-
-  setNotificationTarget(targetId: string): void {
-    this.notificationTarget = targetId
-    console.log(`[wechat] 通知目标已设置: ${targetId}`)
-  }
-
-  getNotificationTarget(): string | null {
-    return this.notificationTarget
-  }
-
-  async notifyUser(text: string): Promise<boolean> {
-    if (!this.notificationTarget) {
-      console.log("[wechat] 无通知目标，跳过通知")
-      return false
-    }
+  async poll(cursor: string): Promise<GetUpdatesResponse> {
     try {
-      await this.sendText(this.notificationTarget, text)
-      return true
-    } catch (err) {
-      console.error(`[wechat] 发送通知失败:`, err)
-      return false
+      return (await this.apiCall(
+        "ilink/bot/getupdates",
+        {
+          get_updates_buf: cursor,
+          base_info: { channel_version: "1.0.0" },
+        },
+        LONG_POLL_TIMEOUT_MS,
+      )) as GetUpdatesResponse
+    } catch (error) {
+      if (isTimeout(error)) return { ret: 0, msgs: [], get_updates_buf: cursor }
+      throw error
     }
   }
 
-  startPolling(): void {
-    if (this.polling) return
-    this.polling = true
-    this.pollLoop()
-  }
-
-  stopPolling(): void {
-    this.polling = false
-  }
-
-  async sendText(to: string, text: string): Promise<string> {
-    if (!this.account) throw new Error("未登录微信")
-
-    const contextToken = this.store.getContext(to)
-    if (!contextToken) {
-      throw new Error(`无上下文token，无法回复 ${to}。请让用户发送新消息。`)
-    }
-
+  async sendText(to: string, text: string, contextToken: string): Promise<void> {
     await this.apiCall("ilink/bot/sendmessage", {
       msg: {
         from_user_id: "",
         to_user_id: to,
-        client_id: this.generateClientId(),
+        client_id: `opencode-wechat:${Date.now()}-${crypto.randomBytes(4).toString("hex")}`,
         message_type: MSG_TYPE_BOT,
         message_state: MSG_STATE_FINISH,
         item_list: [{ type: MSG_ITEM_TEXT, text_item: { text } }],
@@ -98,261 +95,52 @@ export class WeChatClient {
       },
       base_info: { channel_version: "1.0.0" },
     })
-
-    return "消息已发送"
   }
 
-  async sendImage(to: string, filePath: string): Promise<string> {
-    if (!this.account) throw new Error("未登录微信")
+  private async apiCall(endpoint: string, body: object, timeoutMs = 15_000): Promise<unknown> {
+    const account = this.account ?? this.store.loadAccount()
+    if (!account) throw new Error("微信尚未登录")
 
-    const contextToken = this.store.getContext(to)
-    if (!contextToken) {
-      throw new Error(`无上下文token，无法回复 ${to}`)
-    }
-
-    const imageBuffer = fs.readFileSync(filePath)
-    const aesKey = crypto.randomBytes(16)
-    const encrypted = this.encryptAesEcb(imageBuffer, aesKey)
-
-    const uploadResp = (await this.apiCall("ilink/bot/getuploadurl", {
-      to_user_id: to,
-      context_token: contextToken,
-      media_type: MSG_ITEM_IMAGE,
-      content_length: encrypted.length,
-      base_info: { channel_version: "1.0.0" },
-    })) as UploadUrlResponse
-
-    if (!uploadResp.upload_url || !uploadResp.media_id) {
-      throw new Error(`获取上传URL失败: ${JSON.stringify(uploadResp)}`)
-    }
-
-    await fetch(uploadResp.upload_url, {
-      method: "PUT",
-      body: new Uint8Array(encrypted),
-      headers: { "Content-Length": String(encrypted.length) },
-      signal: AbortSignal.timeout(60_000),
-    })
-
-    await this.apiCall("ilink/bot/sendmessage", {
-      msg: {
-        from_user_id: "",
-        to_user_id: to,
-        client_id: this.generateClientId(),
-        message_type: MSG_TYPE_BOT,
-        message_state: MSG_STATE_FINISH,
-        item_list: [
-          {
-            type: MSG_ITEM_IMAGE,
-            image_item: {
-              media_id: uploadResp.media_id,
-              aes_key: aesKey.toString("base64"),
-            },
-          },
-        ],
-        context_token: contextToken,
+    const bodyText = JSON.stringify(body)
+    const response = await this.fetcher(new URL(endpoint, withTrailingSlash(account.baseUrl)), {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        AuthorizationType: "ilink_bot_token",
+        Authorization: `Bearer ${account.token}`,
+        "X-WECHAT-UIN": randomWechatUin(),
       },
-      base_info: { channel_version: "1.0.0" },
+      body: bodyText,
+      signal: AbortSignal.timeout(timeoutMs),
     })
-
-    return "图片已发送"
-  }
-
-  private async pollLoop(): Promise<void> {
-    let buf = this.store.getUpdatesBuf
-    console.log("[wechat] 开始监听微信消息...")
-
-    while (this.polling) {
-      try {
-        const resp = await this.getUpdates(buf)
-
-        if (resp.ret !== undefined && resp.ret !== 0) {
-          console.error(`[wechat] getUpdates 错误: ret=${resp.ret} errmsg=${resp.errmsg ?? ""}`)
-          await this.sleep(5000)
-          continue
-        }
-
-        if (resp.get_updates_buf) {
-          buf = resp.get_updates_buf
-          this.store.getUpdatesBuf = buf
-        }
-
-        for (const msg of resp.msgs ?? []) {
-          if (msg.message_type !== MSG_TYPE_USER) continue
-
-          const parsed = parseMessage(msg)
-          if (!parsed) continue
-
-          const contextKey = parsed.isGroup ? parsed.groupId! : parsed.senderId
-          if (parsed.contextToken) {
-            this.store.cacheContext(contextKey, parsed.contextToken)
-            if (parsed.isGroup) {
-              this.store.cacheContext(parsed.senderId, parsed.contextToken)
-            }
-          }
-
-          const senderShort = parsed.senderName
-          console.log(
-            `[wechat] 收到${parsed.isGroup ? "群" : "私"}消息 [${parsed.type}]: ` +
-              `from=${senderShort} ` +
-              `"${parsed.content.slice(0, 60)}"`,
-          )
-
-          this.setNotificationTarget(contextKey)
-
-          if (this.onMessageCallback) {
-            const prompt = formatForAI(parsed)
-            await this.onMessageCallback(prompt, contextKey, parsed.contextToken)
-          }
-        }
-      } catch (err) {
-        console.error(`[wechat] 轮询异常: ${err}`)
-        await this.sleep(3000)
-      }
-    }
-  }
-
-  private async getUpdates(buf: string): Promise<GetUpdatesResponse> {
+    const text = await response.text()
+    if (!response.ok) throw new Error(`微信 API 请求失败: HTTP ${response.status}`)
     try {
-      const raw = await this.apiCall(
-        "ilink/bot/getupdates",
-        {
-          get_updates_buf: buf,
-          base_info: { channel_version: "1.0.0" },
-        },
-        LONG_POLL_TIMEOUT_MS,
-      )
-      return raw as GetUpdatesResponse
-    } catch (err) {
-      if (err instanceof Error && err.name === "AbortError") {
-        return { ret: 0, msgs: [], get_updates_buf: buf }
-      }
-      throw err
-    }
-  }
-
-  private async qrLogin(): Promise<AccountData | null> {
-    console.log("[wechat] 正在获取微信登录二维码...")
-
-    const qrResp = (await fetch(`${ILINK_BASE}/ilink/bot/get_bot_qrcode?bot_type=${encodeURIComponent(BOT_TYPE)}`).then(
-      (r) => r.json(),
-    )) as { qrcode: string; qrcode_img_content: string }
-
-    console.log("\n扫码链接（可复制到浏览器）:")
-    console.log(qrResp.qrcode_img_content + "\n")
-    console.log("请使用微信扫描以下二维码：\n")
-
-    try {
-      const qrterm = await import("qrcode-terminal")
-      await new Promise<void>((resolve) => {
-        qrterm.default.generate(qrResp.qrcode_img_content, { small: true }, (qr: string) => {
-          console.log(qr + "\n")
-          resolve()
-        })
-      })
-    } catch {
-      console.log("[wechat] qrcode-terminal 不可用，请使用上方链接扫码")
-    }
-
-    console.log("[wechat] 等待扫码...")
-    const deadline = Date.now() + 480_000
-    let scannedPrinted = false
-
-    while (Date.now() < deadline) {
-      const status = (await fetch(
-        `${ILINK_BASE}/ilink/bot/get_qrcode_status?qrcode=${encodeURIComponent(qrResp.qrcode)}`,
-      ).then((r) => r.json())) as {
-        status: "wait" | "scaned" | "confirmed" | "expired"
-        bot_token?: string
-        ilink_bot_id?: string
-        baseurl?: string
-        ilink_user_id?: string
-      }
-
-      switch (status.status) {
-        case "wait":
-          break
-        case "scaned":
-          if (!scannedPrinted) {
-            console.log("[wechat] 已扫码，请在微信中确认...")
-            scannedPrinted = true
-          }
-          break
-        case "expired":
-          console.log("[wechat] 二维码已过期，请重新启动。")
-          return null
-        case "confirmed": {
-          if (!status.ilink_bot_id || !status.bot_token) {
-            console.error("[wechat] 登录确认但未返回 bot 信息")
-            return null
-          }
-          const account: AccountData = {
-            token: status.bot_token,
-            baseUrl: status.baseurl || ILINK_BASE,
-            accountId: status.ilink_bot_id,
-            userId: status.ilink_user_id,
-            savedAt: new Date().toISOString(),
-          }
-          this.store.saveCredentials(account)
-          console.log("[wechat] 微信连接成功！")
-          return account
-        }
-      }
-      await this.sleep(1000)
-    }
-
-    console.log("[wechat] 登录超时")
-    return null
-  }
-
-  private async apiCall(endpoint: string, body: object, timeoutMs = 15_000): Promise<object> {
-    if (!this.account) throw new Error("未登录")
-
-    const url = `${this.account.baseUrl}/${endpoint}`
-    const bodyStr = JSON.stringify(body)
-
-    const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), timeoutMs)
-
-    try {
-      const res = await fetch(url, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          AuthorizationType: "ilink_bot_token",
-          Authorization: `Bearer ${this.account.token}`,
-          "X-WECHAT-UIN": this.randomWechatUin(),
-          "Content-Length": String(Buffer.byteLength(bodyStr, "utf-8")),
-        },
-        body: bodyStr,
-        signal: controller.signal,
-      })
-      clearTimeout(timer)
-
-      const text = await res.text()
-      if (!res.ok) throw new Error(`HTTP ${res.status}: ${text}`)
       return JSON.parse(text)
-    } catch (err) {
-      clearTimeout(timer)
-      throw err
+    } catch {
+      throw new Error("微信 API 返回了无效 JSON")
     }
   }
 
-  private generateClientId(): string {
-    return `opencode-wechat:${Date.now()}-${crypto.randomBytes(4).toString("hex")}`
+  private async fetchJSON(url: string): Promise<unknown> {
+    const response = await this.fetcher(url, { signal: AbortSignal.timeout(15_000) })
+    if (!response.ok) throw new Error(`微信 API 请求失败: HTTP ${response.status}`)
+    return response.json()
   }
+}
 
-  private randomWechatUin(): string {
-    const uint32 = crypto.randomBytes(4).readUInt32BE(0)
-    return Buffer.from(String(uint32), "utf-8").toString("base64")
-  }
+function withTrailingSlash(value: string): string {
+  return value.endsWith("/") ? value : `${value}/`
+}
 
-  private encryptAesEcb(data: Buffer, key: Buffer): Buffer {
-    const cipher = crypto.createCipheriv("aes-128-ecb", key, null)
-    cipher.setAutoPadding(true)
-    return Buffer.concat([cipher.update(data), cipher.final()])
-  }
+function randomWechatUin(): string {
+  return Buffer.from(String(crypto.randomBytes(4).readUInt32BE(0)), "utf8").toString("base64")
+}
 
-  private sleep(ms: number): Promise<void> {
-    return new Promise((r) => setTimeout(r, ms))
-  }
+function isTimeout(error: unknown): boolean {
+  return error instanceof Error && (error.name === "AbortError" || error.name === "TimeoutError")
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
 }

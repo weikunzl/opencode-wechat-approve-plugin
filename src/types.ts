@@ -55,16 +55,6 @@ export type MessageItem = {
   }
 }
 
-export type ParsedMessage = {
-  senderId: string
-  senderName: string
-  content: string
-  type: "text" | "voice" | "image" | "file" | "video" | "unknown"
-  contextToken: string | null
-  isGroup: boolean
-  groupId?: string
-}
-
 export type GetUpdatesResponse = {
   ret?: number
   errcode?: number
