@@ -277,6 +277,7 @@ function isApprovalConversation(value: unknown): value is ApprovalConversation {
     typeof value.version === "string" &&
     Array.isArray(value.requestIDs) &&
     value.requestIDs.every((id) => typeof id === "string") &&
+    ["once", "always", "reject"].includes(String(value.decision)) &&
     typeof value.createdAt === "number"
   )
 }

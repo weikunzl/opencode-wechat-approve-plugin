@@ -64,3 +64,20 @@ test("selects by ordinal project and operation description", () => {
 test("returns null for ordinary text that is not an approval reply", () => {
   assert.equal(interpretDeterministic("今天天气怎么样", [approval("r1", 1)]), null)
 })
+
+test("inherits the decision during a clarification conversation", () => {
+  const pending = [approval("r1", 1), approval("r2", 2)]
+  const conversation = {
+    version: "r1,r2",
+    requestIDs: ["r1", "r2"],
+    decision: "once",
+    createdAt: 1,
+  }
+
+  assert.deepEqual(interpretDeterministic("第一个", pending, conversation), {
+    requestIDs: ["r1"],
+    decision: "once",
+    confidence: 1,
+    explanation: "deterministic",
+  })
+})

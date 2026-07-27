@@ -37,5 +37,6 @@ export interface WeChatContext {
 export interface ApprovalConversation {
   version: string
   requestIDs: string[]
+  decision: "once" | "always" | "reject"
   createdAt: number
 }

@@ -12,7 +12,7 @@ export function interpretDeterministic(
   conversation: ApprovalConversation | null = null,
 ): ApprovalIntent | null {
   const normalized = normalize(text)
-  const decision = determineDecision(normalized)
+  const decision = parseApprovalDecision(normalized) ?? conversation?.decision ?? null
   if (!decision) return null
   if (pending.length === 0) return clarify("没有待审批请求")
 
@@ -26,7 +26,8 @@ export function interpretDeterministic(
   return resolved(selected, decision)
 }
 
-function determineDecision(text: string): "once" | "always" | "reject" | null {
+export function parseApprovalDecision(text: string): "once" | "always" | "reject" | null {
+  text = normalize(text)
   if (REJECT.test(text)) return "reject"
   if (ALWAYS.test(text)) return "always"
   if (ONCE.test(text)) return "once"
