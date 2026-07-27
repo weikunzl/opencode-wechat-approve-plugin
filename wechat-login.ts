@@ -5,7 +5,7 @@ import qrterm from "qrcode-terminal"
 
 const ILINK_BASE = "https://ilinkai.weixin.qq.com"
 const BOT_TYPE = "3"
-const WECHAT_DIR = path.join(process.env.HOME || "~", ".opencode", "wechat")
+const WECHAT_DIR = path.join(process.env.HOME || "~", ".opencode", "wechat-approve")
 
 fs.mkdirSync(WECHAT_DIR, { recursive: true })
 

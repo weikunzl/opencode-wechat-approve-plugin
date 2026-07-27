@@ -2,12 +2,14 @@ import fs from "node:fs"
 import path from "node:path"
 import type { AccountData } from "./types.js"
 
+export const WECHAT_DATA_DIR_NAME = "wechat-approve"
+
 export class WeChatStore {
   private dir: string
   private ctxTokens: Map<string, string> = new Map()
 
   constructor() {
-    this.dir = path.join(process.env.HOME || process.env.USERPROFILE || "~", ".opencode", "wechat")
+    this.dir = path.join(process.env.HOME || process.env.USERPROFILE || "~", ".opencode", WECHAT_DATA_DIR_NAME)
     fs.mkdirSync(this.dir, { recursive: true })
     this.loadContextTokens()
   }

@@ -10,7 +10,7 @@
 - 接收微信消息并注入指定的 OpenCode 会话
 - 支持文本和图片回复
 - 自动恢复最近的微信通知目标，重启后无需再次激活
-- 登录凭据仅保存在本机 `~/.opencode/wechat/`
+- 登录凭据仅保存在本机 `~/.opencode/wechat-approve/`
 
 ## 状态图片表情
 
@@ -74,7 +74,7 @@ opencode web
 首次启动时，运行 OpenCode 的终端会显示微信二维码和扫码链接。扫码并在微信确认后，凭据会保存到：
 
 ```text
-~/.opencode/wechat/account.json
+~/.opencode/wechat-approve/account.json
 ```
 
 `opencode web` 的浏览器页面不会显示二维码，请查看启动它的终端。
@@ -128,7 +128,7 @@ Reply "C1 no" to deny
 
 ## 会话绑定
 
-微信消息默认进入 `~/.opencode/wechat/session.json` 中保存的 OpenCode 会话。可以把现有会话 ID 写入该文件：
+微信消息默认进入 `~/.opencode/wechat-approve/session.json` 中保存的 OpenCode 会话。可以把现有会话 ID 写入该文件：
 
 ```json
 {
@@ -141,7 +141,7 @@ Reply "C1 no" to deny
 ## 本地数据
 
 ```text
-~/.opencode/wechat/
+~/.opencode/wechat-approve/
 ├── account.json     # 微信登录凭据，权限为 600
 ├── session.json     # OpenCode 会话 ID
 ├── context.json     # 微信回复上下文
