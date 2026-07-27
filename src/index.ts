@@ -3,6 +3,7 @@ import type { Event, Permission } from "@opencode-ai/sdk"
 import { tool } from "@opencode-ai/plugin"
 import { WeChatClient } from "./client.js"
 import { WeChatStore } from "./store.js"
+import { formatStatusMessage } from "./status-message.js"
 
 interface PendingPermission {
   permission: Permission
@@ -76,10 +77,11 @@ export const WeChatPlugin: Plugin = async (input) => {
     if (pending) {
       resolvePendingPermission(code, response)
       const label = response === "reject" ? "Denied" : response === "always" ? "Always allowed" : "Approved"
-      return `[OK] #${code} ${label}`
+      const status = response === "reject" ? "rejected" : "approved"
+      return formatStatusMessage(status, `[OK] #${code} ${label}`)
     }
 
-    return `[WARN] #${code} expired, please retry the operation`
+    return formatStatusMessage("warning", `[WARN] #${code} expired, please retry the operation`)
   }
 
   const parseCommand = (content: string): { code: string; action: string } | null => {
@@ -109,10 +111,11 @@ export const WeChatPlugin: Plugin = async (input) => {
 
     if (cmd) {
       const response = normalizeAction(cmd.action)
+      const wasPending = pendingPermissions.has(cmd.code)
       const result = await handlePermissionConfirmation(cmd.code, response)
       await wechat.notifyUser(result)
 
-      if (response !== "reject" && result.startsWith("[OK]")) {
+      if (response !== "reject" && wasPending) {
         try {
           const sessionID = store.getSessionID()
           if (sessionID) {
@@ -137,16 +140,19 @@ export const WeChatPlugin: Plugin = async (input) => {
 
     if (/^(帮助|help|\?)$/i.test(prompt.trim())) {
       await wechat.notifyUser(
-        [
-          "Commands:",
-          "  C<code> yes  - Approve permission",
-          "  C<code> no   - Deny permission",
-          "  C<code> always - Always allow",
-          "  status       - Pending permissions",
-          "  help         - Show this help",
-          "",
-          "Other messages are forwarded to AI.",
-        ].join("\n"),
+        formatStatusMessage(
+          "help",
+          [
+            "Commands:",
+            "  C<code> yes  - Approve permission",
+            "  C<code> no   - Deny permission",
+            "  C<code> always - Always allow",
+            "  status       - Pending permissions",
+            "  help         - Show this help",
+            "",
+            "Other messages are forwarded to AI.",
+          ].join("\n"),
+        ),
       )
       return
     }
@@ -197,7 +203,7 @@ export const WeChatPlugin: Plugin = async (input) => {
           const { sessionID } = (event as any).properties || {}
           if (!sessionID) break
           const title = await getSessionTitle(sessionID)
-          await wechat.notifyUser(`[Done] ${title}\nAI task completed.`)
+          await wechat.notifyUser(formatStatusMessage("done", `[Done] ${title}\nAI task completed.`))
           break
         }
 
@@ -206,7 +212,7 @@ export const WeChatPlugin: Plugin = async (input) => {
           if (!sessionID) break
           const title = await getSessionTitle(sessionID)
           const errMsg = error?.message || String(error) || "Unknown error"
-          await wechat.notifyUser(`[Error] ${title}\n${errMsg.slice(0, 500)}`)
+          await wechat.notifyUser(formatStatusMessage("error", `[Error] ${title}\n${errMsg.slice(0, 500)}`))
           break
         }
 
@@ -235,7 +241,7 @@ export const WeChatPlugin: Plugin = async (input) => {
         .filter(Boolean)
         .join("\n")
 
-      await wechat.notifyUser(message)
+      await wechat.notifyUser(formatStatusMessage("approval", message))
 
       const { promise, resolve } = createDeferred<"once" | "always" | "reject">()
 
@@ -251,7 +257,7 @@ export const WeChatPlugin: Plugin = async (input) => {
         if (pending) {
           pending.resolve("reject")
           pendingPermissions.delete(code)
-          wechat.notifyUser(`[Timeout] #${code} auto-denied (10min)`).catch(() => {})
+          wechat.notifyUser(formatStatusMessage("timeout", `[Timeout] #${code} auto-denied (10min)`)).catch(() => {})
         }
       }, 10 * 60 * 1000)
 
@@ -320,12 +326,15 @@ export const WeChatPlugin: Plugin = async (input) => {
         async execute(args) {
           const code = nextConfirmCode()
           await wechat.notifyUser(
-            [
-              `[Confirmation #${code}]`,
-              args.description,
-              "",
-              `Reply "${code} yes" or "${code} no"`,
-            ].join("\n"),
+            formatStatusMessage(
+              "approval",
+              [
+                `[Confirmation #${code}]`,
+                args.description,
+                "",
+                `Reply "${code} yes" or "${code} no"`,
+              ].join("\n"),
+            ),
           )
 
           const { promise, resolve } = createDeferred<"once" | "always" | "reject">()
@@ -350,12 +359,14 @@ export const WeChatPlugin: Plugin = async (input) => {
             if (p) {
               p.resolve("reject")
               pendingPermissions.delete(code)
+              wechat.notifyUser(formatStatusMessage("timeout", `[Timeout] #${code} auto-denied (5min)`)).catch(() => {})
             }
           }, 5 * 60 * 1000)
 
           const response = await promise
           const label = response === "reject" ? "Denied" : response === "always" ? "Always allowed" : "Approved"
-          return `[${label}] ${args.description}`
+          const status = response === "reject" ? "rejected" : "approved"
+          return formatStatusMessage(status, `[${label}] ${args.description}`)
         },
       }),
 
