@@ -11,6 +11,8 @@
 
 租约持有者转发修复影响多目录实例的审批和生命周期事件，直接关联 REAL-00、REAL-15、REAL-17、REAL-18；单目录行为与审批语义回归由现有测试保持覆盖。自动化证据来自 `test/plugin.test.js`、`test/semantic-approval.test.js`、`test/integration.test.js` 和相关网关/通知测试，不等价于微信屏幕证据。
 
+发布前影响分析必须至少覆盖上述四项；若变更同时触及审批解析、微信传输、状态存储、安装器或通知格式，应把对应 REAL-01～REAL-18 项加入受影响集合。用户可选择执行 REAL-00～REAL-18 全量真实回归，执行顺序和截图索引格式以 [`docs/approval-security-matrix.md`](approval-security-matrix.md) 为准。
+
 本次发布基线已通过：
 
 - `npm test`：123/123 通过。
@@ -21,6 +23,8 @@
 ## 真实验收交接
 
 真实执行线程必须逐项回传：场景 ID、窗口标题、微信可见原文、脱敏 `requestID=decision`、pending/outbox 前后数量、清理结果和时间戳。本线程在收到这些证据前不修改 REAL-00 至 REAL-18 或 SEC 场景状态，也不并发操作微信会话。
+
+每个真实 `PASS` 还必须关联一张脱敏微信截图索引；截图只能包含标题严格为 `微信ClawBot` 的目标会话，不得包含其他聊天、token、context token、二维码或绑定信息。任一真实场景为 `BLOCKED`/`UNVERIFIED` 或缺少截图时，发布状态必须保持阻塞。
 
 当前门禁仍为 `BLOCKED`：屏幕标题观察到“微信 ClawBot”（含空格），不满足严格标题 `微信ClawBot`，因此没有发送诊断通知，也没有真实 request ID/decision 证据。pending 与 outbox 均为 0，不能据此宣称 REAL-00 通过。
 
