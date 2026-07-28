@@ -22,7 +22,7 @@
 
 ## 真实验收交接
 
-真实执行线程必须逐项回传：场景 ID、窗口标题、微信可见原文、脱敏 `requestID=decision`、pending/outbox 前后数量、清理结果和时间戳。本线程在收到这些证据前不修改 REAL-00 至 REAL-18 或 SEC 场景状态，也不并发操作微信会话。
+真实执行线程必须逐项回传：场景 ID、registry 版本、原始窗口标题、用户目标会话/绑定确认、微信可见原文、脱敏 `requestID=decision`、pending/outbox 前后数量、截图索引、清理结果和时间戳。本线程在收到这些证据前不修改 REAL-00 至 REAL-18 或 SEC 场景状态，也不并发操作微信会话。人工协作规则见 [`docs/manual-live-acceptance.md`](manual-live-acceptance.md)。
 
 每个真实 `PASS` 还必须关联一张脱敏微信截图索引；截图只能包含标题严格为 `微信ClawBot` 的目标会话，不得包含其他聊天、token、context token、二维码或绑定信息。任一真实场景为 `BLOCKED`/`UNVERIFIED` 或缺少截图时，发布状态必须保持阻塞。
 

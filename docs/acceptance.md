@@ -20,11 +20,13 @@
 
 `test/integration.test.js` is an HTTP/内存集成层：它使用 fake gateway、fake fetcher 和 `HttpPermissionAPI`，其中的 approval payload 只证明协议路由，不是微信真实会话证据。`test/semantic-approval.test.js` 使用确定性 fake model，断言原始自然语言、pending request 快照、返回决策以及 once/always/reject 的安全校验；它同样不代表真实模型端到端结果。
 
-REAL-00 至 REAL-18 的安全与恢复验收矩阵、受影响/全量执行档位和截图索引格式见 [`docs/approval-security-matrix.md`](approval-security-matrix.md)。真实 live 仍必须逐项观察微信原文，不能用 fake model、HTTP 或内存结果替代。
+REAL-00 至 REAL-18 的安全与恢复验收矩阵、受影响/全量执行档位和截图索引格式见 [`docs/approval-security-matrix.md`](approval-security-matrix.md)；用户手工发送时遵循 [`docs/manual-live-acceptance.md`](manual-live-acceptance.md)。真实 live 仍必须逐项观察微信原文，不能用 fake model、HTTP 或内存结果替代。
 
 本轮诊断已确认：registry 1.0.5 已包含租约持有者事件转发，服务也已重启加载该 registry spec；但屏幕标题显示“微信 ClawBot”（含空格），不符合严格“微信ClawBot”，因此未发送诊断原文。REAL-00 为 `BLOCKED`，REAL-01 至 REAL-18 为 `UNVERIFIED`（历史 1.0.2 记录保持原版本标注）。
 
 发布前必须根据 [`docs/release-impact-1.0.5.md`](release-impact-1.0.5.md) 识别受影响场景；受影响场景全部真实重跑并取得脱敏微信截图后才能发布。用户可以选择按矩阵执行 REAL-00～REAL-18 全量真实回归；任一真实线程 `BLOCKED` 或 `UNVERIFIED` 都不能改写为通过。
+
+人工协作模式下，用户每条场景开始前必须确认目标会话和绑定身份；真实线程保留原始窗口标题和确认结果。标题含空格时可记录 `MANUAL_CONFIRMED`，但不能伪装为严格标题 `PASS`。主线程只接受包含版本、标题、确认、微信原文摘要、脱敏 requestID/decision、pending/outbox 前后、截图索引和清理结果的完整日志。
 
 可用 `npm run test:e2e:status` 做一轮无副作用状态扫描，或用 `npm run test:e2e:status -- --interval=30000` 周期扫描 OpenCode pending、本地 pending/outbox 和 context 年龄。扫描器不会读取微信屏幕，也不会自动把任何真实场景标记为通过；每轮仍需人工记录微信原文、脱敏 requestID/decision 和清理结果。
 

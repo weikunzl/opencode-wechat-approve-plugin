@@ -1,6 +1,6 @@
 # 真实审批与安全场景矩阵
 
-这是 registry `@wekux/opencode-wechat-approve-plugin@1.0.5` 的验收基线。总清单固定为 REAL-00～REAL-18，共 19 项。每个真实场景只允许在可见标题严格为 `微信ClawBot` 的窗口执行，并记录时间、微信原文、插件可见回复原文、脱敏 request ID/decision、pending 与 outbox 前后数量。HTTP/内存集成和 fake model 只能证明自动化行为；看不到微信原文一律是 `UNVERIFIED` 或 `BLOCKED`。
+这是 registry `@wekux/opencode-wechat-approve-plugin@1.0.5` 的验收基线。总清单固定为 REAL-00～REAL-18，共 19 项。每个真实场景只允许在可见标题严格为 `微信ClawBot` 的窗口执行，或在用户明确选择人工模式后记录为 `MANUAL_CONFIRMED`；两者都必须记录原始标题、用户确认、时间、微信原文、插件可见回复原文、脱敏 request ID/decision、pending 与 outbox 前后数量。HTTP/内存集成和 fake model 只能证明自动化行为；看不到微信原文一律是 `UNVERIFIED` 或 `BLOCKED`。详见 [`docs/manual-live-acceptance.md`](manual-live-acceptance.md)。
 
 ## 总清单
 
@@ -34,7 +34,7 @@
 | 受影响真实回归 | 使用 registry 包，仅执行发布影响映射列出的 REAL 项 | 小版本修复且影响范围明确 | 所有受影响项必须真实 PASS 并有截图 |
 | 全量真实回归 | 用户明确选择后，按 REAL-00、REAL-01…REAL-18 顺序执行 | 跨模块、发布前高风险变更 | 19 项均需真实 PASS 并有截图 |
 
-真实回归始终先执行 REAL-00；标题不严格匹配、没有微信可见原文、或清理 pending 失败时立即停止。`npm run test:e2e:live` 目前只是扫码后的人工记录器，不能自动创建审批或替代上述证据。
+真实回归始终先执行 REAL-00，由主流程创建无副作用通知并由用户确认屏幕原文和截图。严格模式标题不匹配时立即停止；人工模式可在用户逐条确认目标会话/绑定身份后记录 `MANUAL_CONFIRMED`，但不能记为严格 `PASS`。没有微信可见原文或清理 pending 失败时立即停止。`npm run test:e2e:live` 目前只是扫码后的人工记录器，不能自动创建审批或替代上述证据。
 
 ## 截图证据索引格式
 
@@ -51,3 +51,5 @@
 每项结束后必须用明确“第 N 个拒绝”或“拒绝”清空 pending；清理失败即停止并标记 `BLOCKED`。`npm run test:e2e:status` 默认做一轮无副作用扫描，`npm run test:e2e:status -- --interval=30000` 才会周期运行；它只输出 pending/outbox/context 年龄，微信标题和原文仍需人工观察，不会把状态标为通过。
 
 当前实现已修复多目录租约事件转发，且 registry 1.0.5 `dist/index.js` 已包含修复。当前唯一门禁阻塞是屏幕标题显示“微信 ClawBot”而非严格要求的“微信ClawBot”；在标题符合且看到微信原文前，REAL-00 至 REAL-18 仍不得宣称真实通过。旧 QR 绑定进程已停止，避免竞争 context。
+
+主线程按 [`docs/manual-live-acceptance.md`](manual-live-acceptance.md) 扫描真实线程日志；任何缺字段、无截图或 `BLOCKED`/`UNVERIFIED` 记录都不得转成通过。
