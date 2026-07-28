@@ -8,7 +8,12 @@ import { fileURLToPath } from "node:url"
 import spawn from "cross-spawn"
 import { parse } from "jsonc-parser"
 import qrcode from "qrcode-terminal"
-import { doctorInstallation, parseOpenCodePaths, resolveEffectiveModel } from "./cli.js"
+import {
+  doctorInstallation,
+  parseOpenCodePaths,
+  resolveApprovalAgentNames,
+  resolveEffectiveModel,
+} from "./cli.js"
 import { IlinkClientTransport } from "./client.js"
 import {
   install,
@@ -57,6 +62,7 @@ async function main(args: string[]): Promise<number> {
   }
 
   const resolvedConfig = parse(await runOpenCode(["debug", "config"]))
+  const approvalAgentNames = resolveApprovalAgentNames(resolvedConfig)
   const modelState = readJSON(path.join(paths.state, "model.json"))
   const proposed = resolveEffectiveModel(resolvedConfig, modelState)
   const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
@@ -80,6 +86,7 @@ async function main(args: string[]): Promise<number> {
       bind: async (force) => bind(gateway, force),
       sendTest: async () => sendTest(gateway),
       pluginName: pluginSpec,
+      agentNames: approvalAgentNames,
     })
   } finally {
     terminal.close()

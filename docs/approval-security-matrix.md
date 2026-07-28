@@ -1,6 +1,6 @@
 # 真实审批与安全场景矩阵
 
-这是 registry `@wekux/opencode-wechat-approve-plugin@1.0.5` 的验收基线。总清单固定为 REAL-00～REAL-18，共 19 项。严格屏幕 PASS 使用 `evidenceMode=SCREEN`；人工模式在文字字段完整且符合预期时使用 `status=PASS`、`evidenceMode=MANUAL_REPORTED`，不要求截图。`MANUAL_CONFIRMED` 仅表示身份确认，不能单独通过。HTTP/内存集成和 fake model 只能证明自动化行为；缺少微信原文文字一律是 `UNVERIFIED` 或 `BLOCKED`。详见 [`docs/manual-live-acceptance.md`](manual-live-acceptance.md)。
+这是 registry `@wekux/opencode-wechat-approve-plugin@1.0.6` 的验收基线。总清单固定为 REAL-00～REAL-18，共 19 项。严格屏幕 PASS 使用 `evidenceMode=SCREEN`；人工模式在文字字段完整且符合预期时使用 `status=PASS`、`evidenceMode=MANUAL_REPORTED`，不要求截图。`MANUAL_CONFIRMED` 仅表示身份确认，不能单独通过。HTTP/内存集成和 fake model 只能证明自动化行为；缺少微信原文文字一律是 `UNVERIFIED` 或 `BLOCKED`。详见 [`docs/manual-live-acceptance.md`](manual-live-acceptance.md)。
 
 所有场景的最小统一记录字段为：`scenarioID`、`status`、`evidenceMode`、微信原文、`requestID-decision`、pending 前后、outbox 前后、清理结果和阻塞原因。结构化日志可使用现有英文键名，但不得省略这些语义字段。
 
@@ -53,6 +53,6 @@
 
 每项结束后必须用明确“第 N 个拒绝”或“拒绝”清空 pending；清理失败即停止并标记 `BLOCKED`。`npm run test:e2e:status` 默认做一轮无副作用扫描，`npm run test:e2e:status -- --interval=30000` 才会周期运行；它只输出 pending/outbox/context 年龄，微信标题和原文仍需人工观察，不会把状态标为通过。
 
-当前实现已修复多目录租约事件转发，且 registry 1.0.5 `dist/index.js` 已包含修复。REAL-00 和 REAL-01 已分别消费 retry-00 与任务完成的完整文字证据，均标记 `status=PASS`、`evidenceMode=MANUAL_REPORTED`；两者都不是屏幕证据。OpenCode 的 `bash/*=allow` 仍会阻止 REAL-02 至 REAL-14 等审批语义场景形成 `permission.asked`/pending=1；这些场景在 active agent 最终匹配为 `bash=ask` 并重载会话后才能继续。旧 QR 绑定进程已停止，避免竞争 context。
+历史 REAL-00 和 REAL-01 的 `1.0.5` 文字证据保持有效，但不覆盖本版本安装器变更。`1.0.6` 安装器会把 `bash: ask` 写入全局与已解析主 agent，避免 agent 级 `*/*=allow` 覆盖审批前置条件；REAL-02 至 REAL-14 必须在 registry `1.0.6` 安装、重启或新建会话后重新验证 `permission.asked` 和 pending，再逐项取证。旧 QR 绑定进程已停止，避免竞争 context。
 
 主线程按 [`docs/manual-live-acceptance.md`](manual-live-acceptance.md) 扫描真实线程日志；任何缺字段或 `BLOCKED`/`UNVERIFIED` 记录都不得转成通过。

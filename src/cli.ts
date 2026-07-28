@@ -17,6 +17,10 @@ interface Check {
   detail: string
 }
 
+enum AgentMode {
+  Subagent = "subagent",
+}
+
 export interface DoctorResult {
   plugin: Check
   binding: Check
@@ -46,6 +50,15 @@ export function resolveEffectiveModel(
   return typeof first?.providerID === "string" && typeof first.modelID === "string"
     ? `${first.providerID}/${first.modelID}`
     : null
+}
+
+export function resolveApprovalAgentNames(resolvedConfig: unknown): string[] {
+  // 只选择会处理用户任务的 agent，避免改变子 agent 的独立授权边界。
+  const agents = asRecord(asRecord(resolvedConfig)?.agent)
+  return Object.entries(agents ?? {}).flatMap(([name, agent]) => {
+    const config = asRecord(agent)
+    return name && config && config.mode !== AgentMode.Subagent ? [name] : []
+  })
 }
 
 export async function doctorInstallation(options: {

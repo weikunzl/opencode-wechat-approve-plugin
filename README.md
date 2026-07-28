@@ -72,13 +72,16 @@ npx @wekux/opencode-wechat-approve-plugin install
 2. 检查已安装模型并要求确认审批解释模型；
 3. 保留 JSONC 注释和其他插件配置；
 4. 写入中心服务默认地址 `127.0.0.1:4096`；
-5. 显示微信二维码；
-6. 扫码确认后等待用户向机器人发送固定文本 `绑定`；
-7. 发送测试通知，成功后才完成安装。
+5. 自动为全局规则及已解析的主 agent 写入 `bash: ask`，保留已有的更具体命令例外和显式 `deny`；
+6. 显示微信二维码；
+7. 扫码确认后等待用户向机器人发送固定文本 `绑定`；
+8. 发送测试通知，成功后才完成安装。
 
 安装器会把当前发布版本的 npm registry 规格（例如
 `@wekux/opencode-wechat-approve-plugin@1.0.5`）写入 OpenCode 的 `plugin` 数组，
 不会把本地 `file://` 托管副本作为最终插件入口。
+
+安装完成后重新启动 `opencode web` 或新建 OpenCode 会话，使自动写入的审批规则参与权限计算；不需要手工编辑 agent 配置。
 
 扫码绑定的是实际微信用户 ID 和 iLink `context_token`，产品不会硬编码联系人名称。
 

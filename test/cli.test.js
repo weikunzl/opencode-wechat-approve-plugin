@@ -4,7 +4,12 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import test from "node:test"
 
-import { doctorInstallation, parseOpenCodePaths, resolveEffectiveModel } from "../dist/cli.js"
+import {
+  doctorInstallation,
+  parseOpenCodePaths,
+  resolveApprovalAgentNames,
+  resolveEffectiveModel,
+} from "../dist/cli.js"
 
 test("parses OpenCode paths containing Windows drive letters and spaces", () => {
   const paths = parseOpenCodePaths(
@@ -34,6 +39,20 @@ test("resolves the configured model before the most recently used model", () => 
     resolveEffectiveModel({}, { recent: [{ providerID: "opencode-go", modelID: "qwen3.7-max" }] }),
     "opencode-go/qwen3.7-max",
   )
+})
+
+test("selects resolved primary agents for approval overrides", () => {
+  // 只覆盖会承接用户任务的 agent，避免修改子 agent 的独立授权边界。
+  const names = resolveApprovalAgentNames({
+    agent: {
+      build: { mode: "primary" },
+      general: { mode: "all" },
+      helper: { mode: "subagent" },
+      invalid: null,
+    },
+  })
+
+  assert.deepEqual(names, ["build", "general"])
 })
 
 test("doctor reports plugin binding model and central server independently", async () => {

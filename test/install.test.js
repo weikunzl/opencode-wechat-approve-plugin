@@ -38,6 +38,47 @@ test("preserves JSONC comments and unrelated settings while installing idempoten
   assert.match(twice, /"port": 4096/)
 })
 
+test("installs approval-safe bash rules without discarding agent exceptions", () => {
+  // 安装两次，验证补丁保持幂等且不会丢失原有细粒度规则。
+  const patched = JSON.parse(patchApprovalConfig(patchApprovalConfig(approvalConfigSource())))
+
+  assert.equal(patched.permission.bash, "ask")
+  assert.equal(patched.agent.build.permission.bash["*"], "ask")
+  assert.equal(patched.agent.build.permission.bash["git status *"], "allow")
+  assert.equal(patched.agent.review.permission.edit, "deny")
+  assert.equal(patched.agent.review.permission.bash, "ask")
+  assert.equal(patched.agent.locked.permission.bash, "deny")
+})
+
+test("adds an approval override for resolved external agents", () => {
+  // 已解析但未写入配置文件的 agent 也必须获得 bash 审批规则。
+  const patched = JSON.parse(patchOpenCodeConfig("{}\n", {
+    plugin: "opencode-wechat-approve-plugin",
+    hostname: "127.0.0.1",
+    port: 4096,
+    agentNames: ["external-primary"],
+  }))
+
+  assert.equal(patched.agent["external-primary"].permission.bash, "ask")
+})
+
+function approvalConfigSource() {
+  // 构造包含通配 allow 与细粒度 allow 的用户配置。
+  return `{
+  "permission": { "read": "allow" },
+  "agent": { "build": { "permission": { "*": "allow", "bash": { "git status *": "allow" } } }, "review": { "permission": { "edit": "deny" } }, "locked": { "permission": { "bash": "deny" } } }
+}\n`
+}
+
+function patchApprovalConfig(source) {
+  // 统一使用安装器的公开配置补丁入口。
+  return patchOpenCodeConfig(source, {
+    plugin: "opencode-wechat-approve-plugin",
+    hostname: "127.0.0.1",
+    port: 4096,
+  })
+}
+
 test("derives the registry plugin spec from the published package version", () => {
   const root = mkdtempSync(join(tmpdir(), "wechat-plugin-spec-"))
   writeFileSync(join(root, "package.json"), '{"version":"1.0.3"}\n')
@@ -84,6 +125,7 @@ test("persists the confirmed model and finishes only after binding and test deli
     availableModels: ["opencode-go/qwen3.7-max"],
     configuredModel: "opencode-go/qwen3.7-max",
     pluginName: "@wekux/opencode-wechat-approve-plugin@1.0.3",
+    agentNames: ["external-primary"],
     confirmModel: async (model) => {
       calls.push(["confirm", model])
       return true
@@ -128,6 +170,10 @@ test("persists the confirmed model and finishes only after binding and test deli
   assert.match(
     readFileSync(configFile, "utf8"),
     /@wekux\/opencode-wechat-approve-plugin@1\.0\.3/,
+  )
+  assert.equal(
+    JSON.parse(readFileSync(configFile, "utf8")).agent["external-primary"].permission.bash,
+    "ask",
   )
 })
 

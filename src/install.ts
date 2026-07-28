@@ -8,6 +8,18 @@ import { WeChatStore } from "./store.js"
 export const PACKAGE_NAME = "@wekux/opencode-wechat-approve-plugin"
 const LEGACY_PACKAGE_NAME = "opencode-wechat-approve-plugin"
 
+enum PermissionKey {
+  All = "*",
+  Bash = "bash",
+}
+
+enum PermissionAction {
+  Ask = "ask",
+  Deny = "deny",
+}
+
+type JSONRecord = Record<string, unknown>
+
 export function registryPluginSpec(packageRoot: string): string {
   // 从发布包元数据读取版本，避免安装器与 package.json 版本漂移。
   const file = path.join(packageRoot, "package.json")
@@ -101,6 +113,29 @@ interface ConfigPatch {
   plugin: string
   hostname: string
   port: number
+  agentNames?: string[]
+}
+
+interface PermissionPatchOptions {
+  source: string
+  value: unknown
+  path: string[]
+  formattingOptions: { insertSpaces: boolean; tabSize: number; eol: "\r\n" | "\n" }
+}
+
+interface ApprovalPatchOptions {
+  source: string
+  config: JSONRecord | null
+  agentNames: string[]
+  formattingOptions: { insertSpaces: boolean; tabSize: number; eol: "\r\n" | "\n" }
+}
+
+interface CorePatchOptions {
+  source: string
+  plugin: string
+  hostname: string
+  port: number
+  formattingOptions: { insertSpaces: boolean; tabSize: number; eol: "\r\n" | "\n" }
 }
 
 interface InstallOptions {
@@ -115,23 +150,127 @@ interface InstallOptions {
   commitPlugin?(): PluginCommit
   hostname?: string
   port?: number
+  agentNames?: string[]
 }
 
 export function patchOpenCodeConfig(source: string, patch: ConfigPatch): string {
-  let output = source.trim() ? source : "{}\n"
-  const parsed = parse(output) as { plugin?: unknown } | undefined
-  const currentPlugins = Array.isArray(parsed?.plugin)
-    ? parsed.plugin
-        .filter((item): item is string => typeof item === "string")
-        .filter((item) => !isOwnedPluginSpec(item))
-    : []
-  const plugins = [...currentPlugins, patch.plugin]
+  // 保留用户 JSONC 内容，同时只写入安装器负责的字段。
+  const output = source.trim() ? source : "{}\n"
+  const parsed = asRecord(parse(output))
   const formattingOptions = { insertSpaces: true, tabSize: 2, eol: detectEOL(output) }
+  const core = patchCoreConfig({ source: output, ...patch, formattingOptions })
+  const approved = patchApprovalPermissions({
+    source: core,
+    config: parsed,
+    agentNames: patch.agentNames ?? [],
+    formattingOptions,
+  })
+  return withTrailingEOL(approved, formattingOptions.eol)
+}
 
-  output = applyEdits(output, modify(output, ["plugin"], plugins, { formattingOptions }))
-  output = applyEdits(output, modify(output, ["server", "hostname"], patch.hostname, { formattingOptions }))
-  output = applyEdits(output, modify(output, ["server", "port"], patch.port, { formattingOptions }))
-  return output.endsWith(formattingOptions.eol) ? output : `${output}${formattingOptions.eol}`
+function patchCoreConfig(options: CorePatchOptions): string {
+  // 只更新插件和中心服务字段，其他 JSONC 内容保持原样。
+  const plugins = installedPlugins(options.source, options.plugin)
+  let output = applyEdits(options.source, modify(options.source, ["plugin"], plugins, {
+    formattingOptions: options.formattingOptions,
+  }))
+  output = applyEdits(output, modify(output, ["server", "hostname"], options.hostname, {
+    formattingOptions: options.formattingOptions,
+  }))
+  return applyEdits(output, modify(output, ["server", "port"], options.port, {
+    formattingOptions: options.formattingOptions,
+  }))
+}
+
+function installedPlugins(source: string, plugin: string): string[] {
+  // 移除旧托管入口后只保留当前 registry 包规格。
+  const plugins = asRecord(parse(source))?.plugin
+  const current = Array.isArray(plugins) ? plugins.filter((item): item is string => {
+    return typeof item === "string" && !isOwnedPluginSpec(item)
+  }) : []
+  return [...current, plugin]
+}
+
+function withTrailingEOL(value: string, eol: "\r\n" | "\n"): string {
+  // 统一文件结尾换行，避免无意义的跨平台配置差异。
+  return value.endsWith(eol) ? value : `${value}${eol}`
+}
+
+function patchApprovalPermissions(options: ApprovalPatchOptions): string {
+  // 让全局规则及用户已声明 agent 都产生可转发的 bash 审批。
+  let output = patchPermissionValue({
+    source: options.source,
+    value: options.config?.permission,
+    path: ["permission"],
+    formattingOptions: options.formattingOptions,
+  })
+  for (const [name, agent] of agentEntries(options.config?.agent, options.agentNames)) {
+    output = patchPermissionValue({
+      source: output,
+      value: agent.permission,
+      path: ["agent", name, "permission"],
+      formattingOptions: options.formattingOptions,
+    })
+  }
+  return output
+}
+
+function patchPermissionValue(options: PermissionPatchOptions): string {
+  // 仅替换权限对象，避免覆盖 agent 的模型、提示词或工具设置。
+  const permission = approvalPermissionValue(options.value)
+  const edits = modify(options.source, options.path, permission, {
+    formattingOptions: options.formattingOptions,
+  })
+  return applyEdits(options.source, edits)
+}
+
+function approvalPermissionValue(value: unknown): JSONRecord {
+  // 将简写规则规范为对象，并让 bash 规则排在通配规则之后。
+  const record = asRecord(value)
+  if (!record) return { [PermissionKey.Bash]: PermissionAction.Ask }
+  const { [PermissionKey.All]: wildcard, [PermissionKey.Bash]: bash, ...specific } = record
+  return {
+    ...(typeof wildcard === "string" ? { [PermissionKey.All]: wildcard } : {}),
+    ...specific,
+    [PermissionKey.Bash]: approvalBashRule(bash),
+  }
+}
+
+function approvalBashRule(value: unknown): unknown {
+  // 通配 ask 必须先于具体命令例外，才能保留其原有优先级。
+  if (value === PermissionAction.Deny) return value
+  const rules = asRecord(value)
+  if (!rules) return PermissionAction.Ask
+  if (rules[PermissionKey.All] === PermissionAction.Deny) return rules
+  const { [PermissionKey.All]: ignored, ...specific } = rules
+  return { [PermissionKey.All]: PermissionAction.Ask, ...specific }
+}
+
+function agentEntries(value: unknown, agentNames: string[]): Array<[string, JSONRecord]> {
+  // 合并已声明与已解析的 agent，确保外部 agent 不会覆盖全局 ask。
+  const configured = configuredAgentEntries(value)
+  for (const name of agentNames) addMissingAgent(configured, name)
+  return [...configured.entries()]
+}
+
+function configuredAgentEntries(value: unknown): Map<string, JSONRecord> {
+  // 忽略异常 agent 配置，避免安装器破坏未知格式的用户字段。
+  return new Map(Object.entries(asRecord(value) ?? {}).flatMap(([name, agent]) => {
+    const record = asRecord(agent)
+    return record ? [[name, record]] : []
+  }))
+}
+
+function addMissingAgent(agents: Map<string, JSONRecord>, name: string): void {
+  // 仅添加合法且未声明的名称，保留用户已有 agent 内容。
+  if (name.trim() && !agents.has(name)) agents.set(name, {})
+}
+
+function asRecord(value: unknown): JSONRecord | null {
+  // 仅接受普通对象，数组和 null 不可作为 JSONC 配置节点。
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as JSONRecord
+    : null
 }
 
 export function isOwnedPluginSpec(spec: string): boolean {
@@ -159,6 +298,7 @@ export async function install(options: InstallOptions): Promise<void> {
     plugin: options.pluginName ?? PACKAGE_NAME,
     hostname: options.hostname ?? "127.0.0.1",
     port: options.port ?? 4096,
+    agentNames: options.agentNames,
   })
 
   const previousContext = options.store.loadContext()

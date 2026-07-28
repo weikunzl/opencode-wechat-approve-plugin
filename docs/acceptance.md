@@ -24,7 +24,7 @@ REAL-00 至 REAL-18 的安全与恢复验收矩阵、受影响/全量执行档�
 
 本轮诊断已确认：registry 1.0.5 已包含租约持有者事件转发，服务也已重启加载该 registry spec。严格屏幕证据使用 `evidenceMode=SCREEN`；人工模式使用结构化文字证据，不要求截图。REAL-00 已消费 retry-00 的完整字段；用户将 REAL-01 重定义为“任务执行完成即可”，因此已消费 `[Done] REAL-01 manual approval` 并标记 `status=PASS`、`evidenceMode=MANUAL_REPORTED`。两者都不等同于屏幕证据；REAL-02 至 REAL-18 尚未执行。
 
-发布前必须根据 [`docs/release-impact-1.0.5.md`](release-impact-1.0.5.md) 识别受影响场景；严格标题场景需 `PASS + SCREEN`，人工场景需符合预期的完整结构化文字证据并标记 `PASS + MANUAL_REPORTED`。用户可以选择按矩阵执行 REAL-00～REAL-18 全量真实回归；任一真实线程 `BLOCKED` 或 `UNVERIFIED` 都不能改写为通过。OpenCode v1.18.7 agent 级 `*/*=allow` 仍覆盖项目 `bash=ask`，因此 REAL-02 至 REAL-14 的审批语义场景需在 active agent 最终匹配 `bash=ask`、重载会话后验证 `permission.asked` 与 pending=1，才能继续。
+发布前必须根据 [`docs/release-impact-1.0.6.md`](release-impact-1.0.6.md) 识别受影响场景；严格标题场景需 `PASS + SCREEN`，人工场景需符合预期的完整结构化文字证据并标记 `PASS + MANUAL_REPORTED`。用户可以选择按矩阵执行 REAL-00～REAL-18 全量真实回归；任一真实线程 `BLOCKED` 或 `UNVERIFIED` 都不能改写为通过。`1.0.6` 安装器会为已解析主 agent 自动写入最终生效的 `bash: ask`，因此 REAL-02 至 REAL-14 必须在 registry 安装、重启或新建会话后验证 `permission.asked` 与 pending=1，才能继续。
 
 人工协作模式下，用户每条场景开始前必须以真实线程文字确认目标会话和绑定身份；真实线程须保留原始窗口标题、用户确认、微信原文、脱敏决策、pending/outbox、清理结果和操作者时间。`MANUAL_CONFIRMED` 仅表示身份确认；字段完整且符合预期时标记 `PASS + MANUAL_REPORTED`。主线程只接受完整结构化文字日志。
 
