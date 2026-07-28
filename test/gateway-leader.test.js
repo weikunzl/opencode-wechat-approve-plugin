@@ -53,7 +53,7 @@ test("only the lease holder starts polling and persists inbound events first", a
 
   assert.equal(firstGateway.starts(), 1)
   assert.equal(secondGateway.starts(), 0)
-  assert.equal(new SharedMailbox(directory).readEvents().length, 1)
+  assert.equal(new SharedMailbox(directory).readEvents().length, 0)
   assert.equal(messages.length, 1)
   await first.stop()
 })
@@ -74,4 +74,22 @@ test("does not dispatch a late callback after leader stop", async () => {
   await harness.emit({ messageID: "late", senderID: "owner", text: "拒绝", receivedAt: 20 })
 
   assert.deepEqual(messages, [])
+})
+
+test("retains inbound mailbox event when owner handling fails", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "wechat-gateway-leader-retry-"))
+  const harness = gatewayHarness()
+  const mailbox = new SharedMailbox(directory)
+  const leader = new GatewayLeader({
+    gateway: harness.gateway,
+    mailbox,
+    lease: { acquire: () => true, release: () => {} },
+    ownerInstanceID: "owner",
+  })
+
+  await leader.start(async () => { throw new Error("owner unavailable") })
+  await assert.rejects(harness.emit({ messageID: "retry", senderID: "owner", text: "允许", receivedAt: 20 }), /owner unavailable/)
+
+  assert.equal(mailbox.readEvents().length, 1)
+  await leader.stop()
 })

@@ -32,8 +32,7 @@ export class PluginEventRouter {
 
   async drain(handler: (event: RoutedPluginEvent) => Promise<void>): Promise<void> {
     // 逐条处理并确认，崩溃时未确认事件会在下一轮重放。
-    for (const record of this.options.mailbox.readEvents()) {
-      if (!record.eventType || !record.payload) continue
+    for (const record of this.options.mailbox.readPluginEvents()) {
       await handler({
         eventID: record.messageID,
         sourceInstanceID: record.sourceInstanceID ?? "unknown",

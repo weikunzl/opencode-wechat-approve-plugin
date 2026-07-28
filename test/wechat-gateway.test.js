@@ -116,6 +116,38 @@ test("persists inbox before cursor when an ingress recorder is configured", asyn
   assert.equal(store.loadCursor(), "cursor-after-inbox")
 })
 
+test("does not advance processed messages when ingress recording fails", async () => {
+  const { batches, gateway, store } = harness()
+  gateway.setInboundRecorder(async () => {
+    throw new Error("inbox unavailable")
+  })
+  batches.push({
+    ret: 0,
+    get_updates_buf: "cursor-after-failure",
+    msgs: [privateText({ senderID: "owner@im.wechat", text: "好的", id: "m-inbox-failure" })],
+  })
+
+  await assert.rejects(gateway.pollOnce(async () => {}), /inbox unavailable/)
+
+  assert.equal(store.loadCursor(), "")
+  assert.deepEqual(store.loadProcessedMessageIDs(), [])
+})
+
+test("does not mark a message processed when its handler fails", async () => {
+  const { batches, gateway, store } = harness()
+  gateway.setInboundRecorder(async () => {})
+  batches.push({
+    ret: 0,
+    get_updates_buf: "cursor-after-handler-failure",
+    msgs: [privateText({ senderID: "owner@im.wechat", text: "好的", id: "m-handler-failure" })],
+  })
+
+  await assert.rejects(gateway.pollOnce(async () => { throw new Error("handler unavailable") }), /handler unavailable/)
+
+  assert.equal(store.loadCursor(), "")
+  assert.deepEqual(store.loadProcessedMessageIDs(), [])
+})
+
 test("persists outbound notification until delivery succeeds", async () => {
   const { gateway, store, sent } = harness()
   const notification = {

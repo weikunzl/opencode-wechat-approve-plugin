@@ -28,6 +28,9 @@ export type MailboxRecord =
   | ({ kind: MailboxRecordKind.Event } & MailboxEvent)
   | ({ kind: MailboxRecordKind.Command } & MailboxCommand)
 
+type MailboxEventRecord = Extract<MailboxRecord, { kind: MailboxRecordKind.Event }>
+type PluginMailboxEvent = MailboxEventRecord & { eventType: string; payload: Record<string, unknown> }
+
 const MAILBOX_FILE = "shared-mailbox-v1.json"
 const LOCK_DIRECTORY = "shared-mailbox.lock"
 
@@ -52,9 +55,14 @@ export class SharedMailbox {
     this.update((records) => this.appendUnique(records, { kind: MailboxRecordKind.Command, ...command }, command.commandID))
   }
 
-  readEvents(): Array<Extract<MailboxRecord, { kind: MailboxRecordKind.Event }>> {
+  readEvents(): MailboxEventRecord[] {
     // 事件按持久化顺序返回，排序由 Leader 在写入前完成。
     return this.read().filter(isEventRecord)
+  }
+
+  readPluginEvents(): PluginMailboxEvent[] {
+    // 只把带插件事件类型的记录交给事件路由，保留微信入站记录的确认权。
+    return this.readEvents().filter(isPluginEvent)
   }
 
   readCommands(instanceID: string): Array<Extract<MailboxRecord, { kind: MailboxRecordKind.Command }>> {
@@ -121,4 +129,9 @@ function isMailboxRecord(value: unknown): value is MailboxRecord {
 function isPayload(value: unknown): value is Record<string, unknown> {
   // 事件 payload 只接受普通对象，防止函数或数组跨进程序列化。
   return Boolean(value && typeof value === "object" && !Array.isArray(value))
+}
+
+function isPluginEvent(record: MailboxEventRecord): record is PluginMailboxEvent {
+  // 插件事件必须同时包含类型和对象负载，微信入站摘要不参与路由。
+  return typeof record.eventType === "string" && isPayload(record.payload)
 }

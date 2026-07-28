@@ -53,7 +53,9 @@ export class GatewayLeader {
     // 入站先写脱敏事件摘要，再交给审批路由，保证重启可检测重复消息。
     if (!this.running) return
     if (!this.recorderConfigured) this.persistInbound(message)
-    if (this.running) await onMessage(message)
+    if (!this.running) return
+    await onMessage(message)
+    this.options.mailbox.acknowledgeEvent(message.messageID)
   }
 
   private configureRecorder(): void {

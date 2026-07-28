@@ -135,8 +135,6 @@ export class WeChatGateway {
       if (!parsed || !ownerID || parsed.message.senderID !== ownerID) continue
       if (parsed.group || this.seen.has(parsed.message.messageID)) continue
 
-      this.seen.add(parsed.message.messageID)
-      this.store.saveProcessedMessageIDs([...this.seen])
       const bindingMessage = binding && normalize(parsed.message.text) === "绑定"
       if (binding && !bindingMessage) continue
       if (bindingMessage && !parsed.contextToken) {
@@ -153,6 +151,8 @@ export class WeChatGateway {
       if (signal?.aborted) return
       if (this.inboundRecorder) await this.inboundRecorder(parsed.message)
       await onMessage(parsed.message)
+      this.seen.add(parsed.message.messageID)
+      this.store.saveProcessedMessageIDs([...this.seen])
     }
     if (typeof nextCursor === "string" && this.inboundRecorder) this.store.saveCursor(nextCursor)
     if (!signal?.aborted && !binding && this.store.loadOutbox().length > 0 && this.canFlushOutbox()) {
