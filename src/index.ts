@@ -1,3 +1,4 @@
+import crypto from "node:crypto"
 import type { Plugin } from "@opencode-ai/plugin"
 import { ApprovalManager } from "./approval-manager.js"
 import { IlinkClientTransport } from "./client.js"
@@ -7,6 +8,10 @@ import { HttpPermissionAPI } from "./opencode-permissions.js"
 import { OpenCodeApprovalModel } from "./opencode-model.js"
 import { normalizeOpenCodeEvent } from "./event-normalizer.js"
 import { NormalizedEventKind } from "./plugin-types.js"
+import { GatewayLeader } from "./gateway-leader.js"
+import { PluginEventRouter } from "./plugin-event-router.js"
+import { PluginInstanceRegistry } from "./plugin-instance.js"
+import { SharedMailbox } from "./shared-mailbox.js"
 import { RuntimeLease } from "./runtime-lease.js"
 import { SessionNotifier } from "./session-notifier.js"
 import { WeChatStore } from "./store.js"
@@ -18,6 +23,20 @@ interface RuntimeGateway {
   start(onMessage: (message: InboundApprovalMessage) => Promise<void>): void
   send(notification: NotificationEnvelope): Promise<void>
   stop?(): Promise<void>
+}
+
+interface RuntimeLeader {
+  start(onMessage: (message: InboundApprovalMessage) => Promise<void>): Promise<boolean>
+  stop(): Promise<void>
+}
+
+interface RuntimeEventRouter {
+  publish(input: { eventID: string; eventType: string; payload: Record<string, unknown> }): void
+  drain(handler: (event: { eventType: string; payload: Record<string, unknown> }) => Promise<void>): Promise<void>
+}
+
+interface RuntimeInstanceRegistry {
+  dispose(instanceID: string): void
 }
 
 interface RuntimeApprovalManager {
@@ -81,8 +100,12 @@ export function createPluginRuntime(dependencies: {
     setOnLost?(callback: () => void): void
   }
   timers?: Partial<RuntimeTimers>
+  leader?: RuntimeLeader
+  eventRouter?: RuntimeEventRouter
+  instanceRegistry?: RuntimeInstanceRegistry
+  instanceID?: string
 }) {
-  const { gateway, approvalManager, sessionNotifier, lease } = dependencies
+  const { gateway, approvalManager, sessionNotifier, lease, leader, eventRouter } = dependencies
   const defaultTimers: RuntimeTimers = {
     setTimeout: (callback: () => void, milliseconds: number) =>
       globalThis.setTimeout(callback, milliseconds),
@@ -99,6 +122,8 @@ export function createPluginRuntime(dependencies: {
   let expiryTimer: unknown = null
   let deactivation: Promise<void> | null = null
   let ownerHandler: RuntimeEventHandler | null = null
+  let leaderActive = false
+  let eventDrainTimer: unknown = null
 
   const deactivate = (releaseLease: boolean): Promise<void> => {
     if (deactivation) return deactivation
@@ -108,7 +133,11 @@ export function createPluginRuntime(dependencies: {
       startupTimer = null
       if (expiryTimer !== null) timers.clearInterval(expiryTimer)
       expiryTimer = null
-      await gateway.stop?.()
+      if (leader) await leader.stop()
+      else await gateway.stop?.()
+      if (eventDrainTimer !== null) timers.clearInterval(eventDrainTimer)
+      eventDrainTimer = null
+      if (dependencies.instanceRegistry && dependencies.instanceID) dependencies.instanceRegistry.dispose(dependencies.instanceID)
       if (leaseOwner === ownerHandler) leaseOwner = null
       if (releaseLease) lease?.release()
     })()
@@ -129,6 +158,26 @@ export function createPluginRuntime(dependencies: {
     }
   }
 
+  const processEvent = async (event: EventLike): Promise<void> => {
+    // Leader 统一处理本地和邮箱事件，审批状态只在一个 owner 中变更。
+    const normalized = normalizeOpenCodeEvent(event)
+    if (normalized?.kind === NormalizedEventKind.PermissionAsked) {
+      await deliver(await approvalManager.onPermissionAsked(toPermissionAsked(normalized)))
+      return
+    }
+    if (normalized?.kind === NormalizedEventKind.PermissionReplied) {
+      await approvalManager.onPermissionReplied(toPermissionReplied(normalized))
+      return
+    }
+    await deliver(await sessionNotifier.handle(event))
+  }
+
+  const drainRemoteEvents = async (): Promise<void> => {
+    // 远程实例事件逐条确认，处理期间崩溃会在下轮重放。
+    if (!leaderActive || !eventRouter || !active) return
+    await eventRouter.drain(async (event) => processEvent({ type: event.eventType, properties: event.payload }))
+  }
+
   const hooks = {
     event: async ({ event }: { event: EventLike }): Promise<void> => {
       if (event.type === "global.disposed" || event.type === "server.instance.disposed") {
@@ -140,24 +189,18 @@ export function createPluginRuntime(dependencies: {
         if (leaseOwner && leaseOwner !== ownerHandler) await leaseOwner(event)
         return
       }
-      const normalized = normalizeOpenCodeEvent(event)
-      if (normalized?.kind === NormalizedEventKind.PermissionAsked) {
-        await deliver(await approvalManager.onPermissionAsked(toPermissionAsked(normalized)))
+      if (eventRouter && !leaderActive) {
+        eventRouter.publish(toPluginEvent(event))
         return
       }
-
-      if (normalized?.kind === NormalizedEventKind.PermissionReplied) {
-        await approvalManager.onPermissionReplied(toPermissionReplied(normalized))
-        return
-      }
-
-      await deliver(await sessionNotifier.handle(event))
+      await processEvent(event)
     },
   }
 
   return {
     hooks,
     async start(): Promise<boolean> {
+      if (leader) return startNative()
       if (lease && !lease.acquire()) {
         return false
       }
@@ -205,6 +248,29 @@ export function createPluginRuntime(dependencies: {
       return true
     },
   }
+
+  async function startNative(): Promise<boolean> {
+    // 原生插件实例都加载成功，只有 Leader 负责绑定、轮询和恢复 outbox。
+    active = true
+    leaderActive = await leader!.start(async (message) => {
+      if (active) await deliver(await approvalManager.onMessage(message, () => active))
+    })
+    if (leaderActive && eventRouter) {
+      eventDrainTimer = timers.setInterval(() => void drainRemoteEvents(), 250)
+      unrefTimer(eventDrainTimer)
+    }
+    if (leaderActive) scheduleReconcile()
+    return true
+  }
+
+  function scheduleReconcile(): void {
+    // 仅 Leader 做一次 OpenCode 权限同步，避免多进程重复刷新 pending。
+    startupTimer = timers.setTimeout(() => {
+      startupTimer = null
+      void approvalManager.reconcile(() => active).then(deliver)
+    }, 1_000)
+    unrefTimer(startupTimer)
+  }
 }
 
 function unrefTimer(timer: unknown): void {
@@ -222,10 +288,20 @@ export const WeChatPlugin: Plugin = async (input) => {
   const store = new WeChatStore()
   store.migrateLegacyState()
   const lease = new RuntimeLease(store.getDirectory())
+  const instances = new PluginInstanceRegistry(store.getDirectory())
+  const instance = instances.register({ projectDirectory: input.directory, sessionIDs: [] })
+  const mailbox = new SharedMailbox(store.getDirectory())
+  const eventRouter = new PluginEventRouter({ mailbox, instanceID: instance.instanceID })
   const config = store.loadPluginConfig()
   const internalSessions = new InternalSessionRegistry()
 
   const gateway = new WeChatGateway(store, new IlinkClientTransport(store))
+  const leader = new GatewayLeader({
+    gateway,
+    mailbox,
+    lease,
+    ownerInstanceID: instance.instanceID,
+  })
   const approvalModel = config.model
     ? new OpenCodeApprovalModel({
         serverURL: input.serverUrl,
@@ -256,7 +332,16 @@ export const WeChatPlugin: Plugin = async (input) => {
     Date.now,
     (sessionID) => internalSessions.has(sessionID),
   )
-  const runtime = createPluginRuntime({ gateway, approvalManager, sessionNotifier, lease })
+  const runtime = createPluginRuntime({
+    gateway,
+    approvalManager,
+    sessionNotifier,
+    lease,
+    leader,
+    eventRouter,
+    instanceRegistry: instances,
+    instanceID: instance.instanceID,
+  })
   await runtime.start()
   return runtime.hooks as Awaited<ReturnType<Plugin>>
 }
@@ -281,6 +366,45 @@ function toPermissionReplied(event: Extract<ReturnType<typeof normalizeOpenCodeE
     type: "permission.replied",
     properties: { sessionID: event.sessionID, requestID: event.requestID, reply: event.reply },
   }
+}
+
+function toPluginEvent(event: EventLike): { eventID: string; eventType: string; payload: Record<string, unknown> } {
+  // 只把生命周期和审批所需字段写入邮箱，正文和凭据留在本地内存。
+  const payload = safeEventPayload(event)
+  const eventID = crypto.createHash("sha256").update(JSON.stringify([event.type, payload])).digest("hex").slice(0, 24)
+  return { eventID, eventType: event.type, payload }
+}
+
+function safeEventPayload(event: EventLike): Record<string, unknown> {
+  // 跨进程事件仅保留可重建业务事件的最小字段集合。
+  const source = event.properties ?? {}
+  const payload: Record<string, unknown> = {}
+  for (const key of ["sessionID", "status", "info", "id", "permission", "permissionID", "requestID", "reply", "response", "type", "pattern", "patterns", "time"]) {
+    if (source[key] !== undefined) payload[key] = safeEventValue(key, source[key])
+  }
+  return payload
+}
+
+function safeEventValue(key: string, value: unknown): unknown {
+  // metadata 只允许项目目录，error 只允许错误名，其他字段按原始结构保留。
+  if (key === "info" && isRecord(value)) return pickInfo(value)
+  if (key === "status" && isRecord(value)) return { type: value.type }
+  if (key === "time" && isRecord(value)) return { created: value.created }
+  return key === "error" ? firstLine(value) : value
+}
+
+function pickInfo(value: Record<string, unknown>): Record<string, unknown> {
+  // 会话标题和目录用于通知显示，不携带消息正文。
+  return {
+    ...(typeof value.id === "string" ? { id: value.id } : {}),
+    ...(typeof value.title === "string" ? { title: value.title } : {}),
+    ...(typeof value.directory === "string" ? { directory: value.directory } : {}),
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  // 只接受普通对象，拒绝数组和可执行对象。
+  return Boolean(value && typeof value === "object" && !Array.isArray(value))
 }
 
 function firstLine(error: unknown): string {

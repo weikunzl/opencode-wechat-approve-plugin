@@ -6,6 +6,8 @@ import test from "node:test"
 
 import { ApprovalManager } from "../dist/approval-manager.js"
 import { createPluginRuntime } from "../dist/index.js"
+import { PluginEventRouter } from "../dist/plugin-event-router.js"
+import { SharedMailbox } from "../dist/shared-mailbox.js"
 import { WeChatStore } from "../dist/store.js"
 
 function createGateway() {
@@ -187,6 +189,44 @@ test("accepts the current permission.updated event shape", async () => {
       metadata: { directory: "/workspace" },
     },
   }])
+})
+
+test("routes native plugin events from a secondary instance to the leader", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "wechat-native-runtime-"))
+  const mailbox = new SharedMailbox(directory)
+  let drain
+  const ownerEvents = []
+  const owner = createPluginRuntime({
+    gateway: createGateway(),
+    approvalManager: { reconcile: async () => [], onPermissionAsked: async () => [], onPermissionReplied: async () => {}, onMessage: async () => [] },
+    sessionNotifier: { handle: async (event) => { ownerEvents.push(event); return [] } },
+    leader: { start: async () => true, stop: async () => {} },
+    eventRouter: new PluginEventRouter({ mailbox, instanceID: "owner" }),
+    timers: {
+      setTimeout: () => 1,
+      clearTimeout: () => {},
+      setInterval: (callback) => {
+        drain = callback
+        return 2
+      },
+      clearInterval: () => {},
+    },
+  })
+  const secondary = createPluginRuntime({
+    gateway: createGateway(),
+    approvalManager: { reconcile: async () => [], onPermissionAsked: async () => [], onPermissionReplied: async () => {}, onMessage: async () => [] },
+    sessionNotifier: { handle: async () => [] },
+    leader: { start: async () => false, stop: async () => {} },
+    eventRouter: new PluginEventRouter({ mailbox, instanceID: "secondary" }),
+    timers: { setTimeout: () => 3, clearTimeout: () => {}, setInterval: () => 4, clearInterval: () => {} },
+  })
+
+  await owner.start()
+  await secondary.start()
+  await secondary.hooks.event({ event: { type: "session.idle", properties: { sessionID: "ses-secondary" } } })
+  await drain()
+
+  assert.deepEqual(ownerEvents, [{ type: "session.idle", properties: { sessionID: "ses-secondary" } }])
 })
 
 test("periodically rejects expired approvals and stops the timer on disposal", async () => {
