@@ -10,6 +10,9 @@ export interface MailboxEvent {
   messageID: string
   textDigest: string
   receivedAt: number
+  sourceInstanceID?: string
+  eventType?: string
+  payload?: Record<string, unknown>
 }
 
 export interface MailboxCommand {
@@ -49,9 +52,9 @@ export class SharedMailbox {
     this.update((records) => this.appendUnique(records, { kind: MailboxRecordKind.Command, ...command }, command.commandID))
   }
 
-  readEvents(): MailboxRecord[] {
+  readEvents(): Array<Extract<MailboxRecord, { kind: MailboxRecordKind.Event }>> {
     // 事件按持久化顺序返回，排序由 Leader 在写入前完成。
-    return this.read().filter((record) => record.kind === MailboxRecordKind.Event)
+    return this.read().filter(isEventRecord)
   }
 
   readCommands(instanceID: string): Array<Extract<MailboxRecord, { kind: MailboxRecordKind.Command }>> {
@@ -62,6 +65,11 @@ export class SharedMailbox {
   acknowledgeCommand(commandID: string): void {
     // 命令只有在 owner 完成或明确判定过期后才从邮箱移除。
     this.update((records) => records.filter((record) => !isCommandRecord(record) || record.commandID !== commandID))
+  }
+
+  acknowledgeEvent(messageID: string): void {
+    // Leader 完成事件分发后删除记录，重启前仍可从邮箱重放未确认事件。
+    this.update((records) => records.filter((record) => !isEventRecord(record) || record.messageID !== messageID))
   }
 
   private read(): MailboxRecord[] {
@@ -97,10 +105,20 @@ function isCommandRecord(record: MailboxRecord): record is Extract<MailboxRecord
   return record.kind === MailboxRecordKind.Command
 }
 
+function isEventRecord(record: MailboxRecord): record is Extract<MailboxRecord, { kind: MailboxRecordKind.Event }> {
+  // 事件记录必须有稳定 messageID 和摘要，附加插件事件字段可选。
+  return record.kind === MailboxRecordKind.Event
+}
+
 function isMailboxRecord(value: unknown): value is MailboxRecord {
   // 过滤状态文件中的未知记录，防止未定义命令被执行。
   if (!value || typeof value !== "object" || Array.isArray(value)) return false
   const item = value as Partial<MailboxRecord>
-  if (item.kind === MailboxRecordKind.Event) return typeof item.messageID === "string" && typeof item.textDigest === "string" && typeof item.receivedAt === "number"
+  if (item.kind === MailboxRecordKind.Event) return typeof item.messageID === "string" && typeof item.textDigest === "string" && typeof item.receivedAt === "number" && (item.payload === undefined || isPayload(item.payload))
   return item.kind === MailboxRecordKind.Command && typeof item.commandID === "string" && typeof item.messageID === "string" && typeof item.ownerInstanceID === "string" && typeof item.requestID === "string" && typeof item.expectedRevision === "number" && ["once", "always", "reject"].includes(String(item.decision))
+}
+
+function isPayload(value: unknown): value is Record<string, unknown> {
+  // 事件 payload 只接受普通对象，防止函数或数组跨进程序列化。
+  return Boolean(value && typeof value === "object" && !Array.isArray(value))
 }
