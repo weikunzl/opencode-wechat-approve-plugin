@@ -113,6 +113,8 @@ registry npx：通过/未发布/失败原因
 
 本轮 registry 1.0.5 诊断记录：doctor 四项均为 OK，发布 `dist/index.js` 已包含租约持有者事件转发；服务已重启并使用全局 registry spec。REAL-00 屏幕显示为“微信 ClawBot”（含空格），不符合严格标题“微信ClawBot”，因此未发送诊断消息，REAL-00 标记 `BLOCKED`，其余 REAL 场景标记 `UNVERIFIED`。
 
+REAL-01 当前另有外部阻塞，保持 `UNVERIFIED`：OpenCode v1.18.7 的 agent 级 `*/*=allow` 追加在项目 `bash=ask` 后，evaluate 采用最后匹配，导致通配 allow 覆盖 ask。解除条件是 active agent 最终匹配 `bash=ask`，重载会话后验证 `permission.asked` 且 pending=`1`；在此之前不得标记通过。
+
 ### `prepare failed` 处理记录
 
 先记录脱敏的 `ret`、`errcode`、`errmsg`、`baseHost`、账号摘要、目标摘要和 `contextAgeMs`，不要循环重试。`ret/errcode=-14` 表示 iLink 会话失效：插件清除旧 context、停止轮询，要求重新运行 `bind` 扫码并重启 `opencode web`。非 `-14` 的 `prepare failed` 保留 outbox；绑定用户发送一条新消息后，网关先保存消息携带的新 context，再尝试重发 outbox。该恢复路径已有内存回归测试，但仍需 live E2E 逐项观察微信文本。

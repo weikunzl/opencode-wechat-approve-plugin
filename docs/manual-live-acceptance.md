@@ -33,6 +33,8 @@
 | `pendingBefore` / `pendingAfter` | 处理前后非负整数 |
 | `outboxBefore` / `outboxAfter` | 处理前后非负整数 |
 | `conversationRecord` | 人工模式必填；与操作者时间对应的脱敏对话记录 |
+| `screenshotIndex` | 脱敏截图路径或受控证据索引；自动化/严格 `PASS` 必填，人工模式可为空 |
+| `blockingReason` | `BLOCKED` 或 `UNVERIFIED` 必填；记录可复现的外部阻塞和解除条件 |
 | `cleanupResult` | pending 清理动作和结果 |
 | `operatorTime` | 操作者记录该场景的 ISO-8601 时间 |
 | `status` | 结果状态为 `PASS`、`BLOCKED` 或 `UNVERIFIED`；人工 PASS 必须同时有 `evidenceMode=MANUAL_REPORTED` |
