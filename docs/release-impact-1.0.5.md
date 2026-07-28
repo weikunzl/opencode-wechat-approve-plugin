@@ -24,9 +24,9 @@
 
 真实执行线程必须逐项回传：场景 ID、registry 版本、原始窗口标题、用户目标会话/绑定确认、微信可见原文、脱敏 `requestID=decision`、pending/outbox 前后数量、人工文字证据和操作者时间。本线程在收到这些证据前不修改 REAL-00 至 REAL-18 或 SEC 场景状态，也不并发操作微信会话。严格标题 PASS 另需屏幕证据；人工协作规则见 [`docs/manual-live-acceptance.md`](manual-live-acceptance.md)。
 
-用户人工身份确认以真实线程中的明确文字为证据；人工场景必须提供完整结构化文字字段，不要求截图。严格标题 `PASS` 与人工 `MANUAL_REPORTED` 分开，文字证据不得冒充屏幕 PASS。任一真实场景为 `BLOCKED`/`UNVERIFIED` 或缺少字段时，发布状态必须保持阻塞。
+用户人工身份确认以真实线程中的明确文字为证据；人工场景必须提供完整结构化文字字段，不要求截图。严格标题结果标记 `PASS + SCREEN`，人工结果标记 `PASS + MANUAL_REPORTED`；文字证据不得冒充屏幕证据。`MANUAL_CONFIRMED` 仅表示身份确认，不能单独通过。任一真实场景为 `BLOCKED`/`UNVERIFIED` 或缺少字段时，发布状态必须保持阻塞。
 
-当前 REAL-00 已标记 `MANUAL_REPORTED`，使用 retry-00 的完整文字字段；该状态不等同于严格标题屏幕 PASS。REAL-01 可进入人工协作验收。
+当前 REAL-00 已标记 `status=PASS`、`evidenceMode=MANUAL_REPORTED`，使用 retry-00 的完整文字字段；该结果不是屏幕证据。REAL-01 目前 `UNVERIFIED`，缺少微信澄清原文及 pending/outbox 前后，不能进入 REAL-02。
 
 ## 安全与回滚边界
 

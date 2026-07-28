@@ -48,11 +48,11 @@
 
 - 发版前必须根据代码、配置、依赖和用户可见行为识别受影响的 REAL 场景，并在发布影响文档中列出映射。
 - 受影响场景必须使用待发布的 registry 包在真实微信中重跑；用户可明确选择执行 REAL-00～REAL-18 全量真实回归。
-- REAL-00 必须先通过：严格标题 `PASS` 保持原有屏幕证据门禁；人工模式使用完整结构化文字证据，状态标记为 `MANUAL_REPORTED` 或 `MANUAL_CONFIRMED`，不得伪装成严格 `PASS`。
-- 任一真实线程场景为 `BLOCKED` 或 `UNVERIFIED` 时，不得将其标记为通过，也不得以该状态发布；人工模式缺少任一必填文字字段时不得通过。
+- REAL-00 必须先通过：严格标题 `PASS` 使用屏幕证据；人工模式完整结构化文字证据可标记 `status=PASS`、`evidenceMode=MANUAL_REPORTED`，不得伪装成屏幕证据。
+- 任一真实线程场景为 `BLOCKED` 或 `UNVERIFIED` 时，不得将其标记为通过，也不得以该状态发布；人工模式缺少任一必填文字字段或不符合预期时不得通过。
 - 文字证据和报告不得包含 token、context token、二维码、绑定信息、用户 ID 或其他聊天内容；严格屏幕证据仍须遵守同样的脱敏边界。
-- 用户明确选择人工协作模式时，每条场景开始前必须在真实线程文字确认目标会话和绑定身份，并记录原始窗口标题、用户确认和操作者时间；标题不严格匹配只能标记人工状态。
-- REAL-00 必须由主流程先创建无副作用通知，主线程须校验 scenarioID、registry 版本、原始标题、`MANUAL_CONFIRMED`、用户确认、微信原文、脱敏 requestID=decision、pending/outbox 前后、清理结果和操作者时间，完整后才能推进 REAL-01～REAL-18。
+- 用户明确选择人工协作模式时，每条场景开始前必须在真实线程文字确认目标会话和绑定身份，并记录原始窗口标题、用户确认和操作者时间；`MANUAL_CONFIRMED` 仅表示身份确认，不能单独通过。
+- REAL-00 必须由主流程先创建无副作用通知，主线程须校验 scenarioID、registry 版本、原始标题、`MANUAL_CONFIRMED`、用户确认、微信原文、脱敏 requestID=decision、pending/outbox 前后、预期结果、清理结果和操作者时间，完整且符合预期后才能以 `status=PASS`、`evidenceMode=MANUAL_REPORTED` 推进 REAL-01～REAL-18。
 
 ## AI 编码代理要求
 
