@@ -8,6 +8,14 @@
 - `dist/`：`tsc` 生成的构建产物，已被 Git 忽略；禁止手工编辑。
 - `README.md`：面向用户的安装和使用手册，不用于记录 AI 工作过程。
 
+## OpenCode 插件架构约束
+
+- 严格遵循 [OpenCode Plugins 官方文档](https://opencode.ai/docs/plugins/)：包入口导出 `@opencode-ai/plugin` 的 `Plugin` 函数，使用 OpenCode 注入的 `project`、`directory`、`worktree`、`client` 和 `$` 上下文，并返回官方 hooks。
+- 插件必须运行在 OpenCode 插件生命周期内；通知、审批和会话状态通过 `event`、`permission.asked`、`permission.replied` 等官方 hooks 接收，优先使用注入的 SDK `client` 与 OpenCode 交互。
+- 禁止把插件设计成或依赖一个独立的 OpenCode Server：不得由插件启动、管理或要求用户常驻运行额外的 `opencode serve`、`opencode web`、HTTP 监听端口或中心服务，也不得以固定端口和 `attach` 拓扑作为插件正常工作的前提。
+- 微信长轮询属于插件内部的外部 API 客户端任务，可以随插件初始化并在释放时停止；不得为此暴露本地监听端口。需要访问尚未被 SDK 覆盖的 OpenCode 接口时，只能使用当前插件上下文提供的 `serverUrl`，禁止硬编码地址或创建第二个服务。
+- npm 发布包应由 OpenCode 按配置中的包规格自动安装和加载；开发期本地入口只能用于调试，用户手册和安装器不得将 `file://` 托管副本作为正式架构。
+
 ## 构建、测试与开发命令
 
 - `npm ci`：按 lockfile 安装依赖，适用于全新环境和 CI。
@@ -23,6 +31,7 @@
 
 实现时还必须遵守以下约束：
 
+- 新增源码、脚本和工具代码时应优先使用 TypeScript，凡可用 TypeScript 实现的场景尽量避免新增 JavaScript；仅在运行环境、工具链或既有测试框架明确要求时使用 JavaScript。
 - 单个方法（函数）不得超过 20 行；复杂逻辑应拆分为职责清晰的私有方法。
 - 禁止使用魔法值；优先复用已有枚举，没有合适枚举时先定义语义明确的枚举。
 - 每个方法内部都要添加简洁、准确的中文注释，说明关键业务意图或边界处理，避免重复解释语法。
