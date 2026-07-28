@@ -245,13 +245,13 @@
 
 - Modify src/install.ts, src/cli.ts, src/config.ts, package.json, package-lock.json, README.md and affected docs.
 - Add test/install.test.js, test/doctor.test.js and test/release-config.test.js.
-- Update docs/release-impact-2.0.0.md and docs/acceptance.md.
+- Update docs/release-impact-1.1.0.md and docs/acceptance.md.
 
 **Interfaces**
 
 - Installer writes only registry plugin spec and explicit user-approved permission scope; it preserves JSONC and rolls back atomically.
 - Doctor reports plugin package, binding health, model health, shared state permissions, instance count and leader status; it does not start a server.
-- Release metadata uses SemVer 2.0.0 only after all affected real scenarios are rerun.
+- Release metadata uses SemVer 1.1.0 only after all affected real scenarios are rerun.
 
 **Steps**
 
@@ -259,7 +259,7 @@
 - [ ] Run focused tests and confirm current installer still writes host/port or file URL references.
 - [ ] Implement configuration cutover, migration notices and docs mapping; keep legacy state readable and mark it migrated.
 - [ ] Re-run focused tests, npm run build, npm test, npm run coverage and npm run test:e2e.
-- [ ] Commit as feat!: remove central-server architecture and prepare v2 release.
+- [ ] Commit as feat!: remove central-server architecture and prepare v1.1 release.
 
 ---
 
@@ -269,7 +269,7 @@
 - [ ] Run the multi-process fixture in a clean temporary directory and verify no 4096 listener, no opencode web process and one shared binding.
 - [ ] Use the registry package in two normal OpenCode processes for REAL-00 through REAL-18. Record scenario ID, package version, original window title, evidence mode, exact WeChat text, redacted requestID and decision, pending/outbox before and after, cleanup result and operator time.
 - [ ] Verify single, batch, ordinal, target, ambiguity, model safety, lifecycle, failure, cancellation, timeout, restart/outbox, prepare failed/-14 recovery and cross-directory attach. Any missing real text evidence remains UNVERIFIED.
-- [ ] Only after all affected scenarios pass, create a Conventional Commit and v2.0.0 tag; never include AGENTS.md, .omo/ or local state.
+- [ ] Only after all affected scenarios pass, create a Conventional Commit and v1.1.0 tag; never include AGENTS.md, .omo/ or local state.
 
 ## Commit Checkpoints
 

@@ -1,8 +1,8 @@
-# V2 Acceptance
+# V1.1 Acceptance
 
 ## Native plugin migration baseline
 
-当前 2.0.0 实现已切换为官方 OpenCode plugin 生命周期：插件不启动独立 server，不要求 `opencode web`、`opencode serve` 或 `opencode attach`。每个 OpenCode 进程注册到共享实例表；Gateway Leader 独占微信轮询和 outbox，其余实例通过共享 mailbox 发布事件。审批命令使用 requestID、ownerInstanceID 和 revision 原子 claim，再由 owner 进程通过注入式 SDK client 回写。
+当前 1.1.0 实现已切换为官方 OpenCode plugin 生命周期：插件不启动独立 server，不要求 `opencode web`、`opencode serve` 或 `opencode attach`。每个 OpenCode 进程注册到共享实例表；Gateway Leader 独占微信轮询和 outbox，其余实例通过共享 mailbox 发布事件。审批命令使用 requestID、ownerInstanceID 和 revision 原子 claim，再由 owner 进程通过注入式 SDK client 回写。
 
 新增自动化证据包括：事件版本归一化、共享状态 0600/损坏隔离/V1 迁移、实例注册、邮箱幂等、创建时间排序的并发 claim、Leader ingress、owner command worker、失败重试、次实例事件转发和 SDK 权限回写。旧 HTTP/内存测试仍只证明兼容协议，不代表真实微信证据。
 
@@ -30,9 +30,9 @@
 
 REAL-00 至 REAL-18 的安全与恢复验收矩阵、受影响/全量执行档位和文字证据索引格式见 [`docs/approval-security-matrix.md`](approval-security-matrix.md)；用户手工发送时遵循 [`docs/manual-live-acceptance.md`](manual-live-acceptance.md)。真实 live 仍必须逐项观察微信原文，不能用 fake model、HTTP 或内存结果替代。
 
-此前 1.0.x 的人工文字记录仅作为历史参考，不覆盖本次 2.0.0 原生插件迁移。严格屏幕证据使用 `evidenceMode=SCREEN`；人工模式使用结构化文字证据，不要求截图。REAL-00～REAL-18 必须使用 2.0.0 registry 包重新验收，未完成的项目保持 `UNVERIFIED`。
+此前 1.0.x 的人工文字记录仅作为历史参考，不覆盖本次 1.1.0 原生插件迁移。严格屏幕证据使用 `evidenceMode=SCREEN`；人工模式使用结构化文字证据，不要求截图。REAL-00～REAL-18 必须使用 1.1.0 registry 包重新验收，未完成的项目保持 `UNVERIFIED`。
 
-发布前必须根据 [`docs/release-impact-2.0.0.md`](release-impact-2.0.0.md) 识别受影响场景；严格标题场景需 `PASS + SCREEN`，人工场景需符合预期的完整结构化文字证据并标记 `PASS + MANUAL_REPORTED`。用户可以选择按矩阵执行 REAL-00～REAL-18 全量真实回归；任一真实线程 `BLOCKED` 或 `UNVERIFIED` 都不能改写为通过。
+发布前必须根据 [`docs/release-impact-1.1.0.md`](release-impact-1.1.0.md) 识别受影响场景；严格标题场景需 `PASS + SCREEN`，人工场景需符合预期的完整结构化文字证据并标记 `PASS + MANUAL_REPORTED`。用户可以选择按矩阵执行 REAL-00～REAL-18 全量真实回归；任一真实线程 `BLOCKED` 或 `UNVERIFIED` 都不能改写为通过。
 
 人工协作模式下，用户每条场景开始前必须以真实线程文字确认目标会话和绑定身份；真实线程须保留原始窗口标题、用户确认、微信原文、脱敏决策、pending/outbox、清理结果和操作者时间。`MANUAL_CONFIRMED` 仅表示身份确认；字段完整且符合预期时标记 `PASS + MANUAL_REPORTED`。主线程只接受完整结构化文字日志。
 
