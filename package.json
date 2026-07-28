@@ -1,6 +1,6 @@
 {
   "name": "@wekux/opencode-wechat-approve-plugin",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "OpenCode WeChat notifications and remote permission approvals via the ilink API",
   "engines": {
     "node": ">=20"
@@ -28,7 +28,8 @@
     "test": "npm run build && node --test test/run-tests.js",
     "coverage": "npm run build && c8 --reporter=text --reporter=lcov node --test test/run-tests.js",
     "test:e2e": "node scripts/e2e-smoke.js",
-    "test:e2e:live": "node scripts/e2e-live.js"
+    "test:e2e:live": "node scripts/e2e-live.js",
+    "test:e2e:status": "node scripts/e2e-status.js"
   },
   "dependencies": {
     "cross-spawn": "^7.0.6",

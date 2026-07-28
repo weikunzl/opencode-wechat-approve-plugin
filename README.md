@@ -77,7 +77,7 @@ npx @wekux/opencode-wechat-approve-plugin install
 7. 发送测试通知，成功后才完成安装。
 
 安装器会把当前发布版本的 npm registry 规格（例如
-`@wekux/opencode-wechat-approve-plugin@1.0.2`）写入 OpenCode 的 `plugin` 数组，
+`@wekux/opencode-wechat-approve-plugin@1.0.4`）写入 OpenCode 的 `plugin` 数组，
 不会把本地 `file://` 托管副本作为最终插件入口。
 
 扫码绑定的是实际微信用户 ID 和 iLink `context_token`，产品不会硬编码联系人名称。

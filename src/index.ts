@@ -65,6 +65,10 @@ interface RuntimeTimers {
   clearInterval(id: unknown): void
 }
 
+type RuntimeEventHandler = (event: EventLike) => Promise<void>
+
+let leaseOwner: RuntimeEventHandler | null = null
+
 export function createPluginRuntime(dependencies: {
   gateway: RuntimeGateway
   approvalManager: RuntimeApprovalManager
@@ -92,6 +96,7 @@ export function createPluginRuntime(dependencies: {
   let startupTimer: unknown = null
   let expiryTimer: unknown = null
   let deactivation: Promise<void> | null = null
+  let ownerHandler: RuntimeEventHandler | null = null
 
   const deactivate = (releaseLease: boolean): Promise<void> => {
     if (deactivation) return deactivation
@@ -102,6 +107,7 @@ export function createPluginRuntime(dependencies: {
       if (expiryTimer !== null) timers.clearInterval(expiryTimer)
       expiryTimer = null
       await gateway.stop?.()
+      if (leaseOwner === ownerHandler) leaseOwner = null
       if (releaseLease) lease?.release()
     })()
     return deactivation
@@ -127,7 +133,11 @@ export function createPluginRuntime(dependencies: {
         await deactivate(true)
         return
       }
-      if (!active) return
+      if (!active) {
+        // 多项目实例共享一个租约，非持有者把事件交给唯一活跃实例处理。
+        if (leaseOwner && leaseOwner !== ownerHandler) await leaseOwner(event)
+        return
+      }
       if (isPermissionAsked(event)) {
         await deliver(await approvalManager.onPermissionAsked(event))
         return
@@ -166,6 +176,8 @@ export function createPluginRuntime(dependencies: {
         await deliver(await approvalManager.onMessage(message, () => active))
       })
       active = true
+      ownerHandler = (event) => hooks.event({ event })
+      if (lease) leaseOwner = ownerHandler
       startupTimer = timers.setTimeout(() => {
         startupTimer = null
         if (!active) return

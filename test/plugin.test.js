@@ -106,6 +106,46 @@ test("a secondary plugin instance emits no duplicate notifications", async () =>
   assert.equal(runtime.hooks.tool, undefined)
 })
 
+test("forwards secondary project events to the lease owner", async () => {
+  const ownerGateway = createGateway()
+  const owner = createPluginRuntime({
+    gateway: ownerGateway,
+    approvalManager: {
+      reconcile: async () => [],
+      onPermissionAsked: async () => [
+        { id: "approval-owner", kind: "approval", text: "owner", createdAt: 1 },
+      ],
+      onPermissionReplied: async () => {},
+      onMessage: async () => [],
+    },
+    sessionNotifier: { handle: async () => [] },
+    lease: { acquire: () => true, release: () => {} },
+  })
+  const secondary = createPluginRuntime({
+    gateway: createGateway(),
+    approvalManager: {
+      reconcile: async () => [],
+      onPermissionAsked: async () => [],
+      onPermissionReplied: async () => {},
+      onMessage: async () => [],
+    },
+    sessionNotifier: { handle: async () => [] },
+    lease: { acquire: () => false, release: () => {} },
+  })
+
+  await owner.start()
+  assert.equal(await secondary.start(), false)
+  await secondary.hooks.event({
+    event: {
+      type: "permission.asked",
+      properties: { id: "req-1", sessionID: "ses-1", permission: "bash", patterns: [] },
+    },
+  })
+
+  assert.deepEqual(ownerGateway.sent.map((item) => item.text), ["owner"])
+  await owner.hooks.event({ event: { type: "global.disposed", properties: {} } })
+})
+
 test("periodically rejects expired approvals and stops the timer on disposal", async () => {
   const gateway = createGateway()
   let tick
