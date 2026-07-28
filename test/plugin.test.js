@@ -108,7 +108,7 @@ test("a secondary plugin instance emits no duplicate notifications", async () =>
   assert.equal(runtime.hooks.tool, undefined)
 })
 
-test("forwards secondary project events to the lease owner", async () => {
+test("drops uncoordinated secondary events without a native mailbox", async () => {
   const ownerGateway = createGateway()
   const owner = createPluginRuntime({
     gateway: ownerGateway,
@@ -144,7 +144,7 @@ test("forwards secondary project events to the lease owner", async () => {
     },
   })
 
-  assert.deepEqual(ownerGateway.sent.map((item) => item.text), ["owner"])
+  assert.deepEqual(ownerGateway.sent, [])
   await owner.hooks.event({ event: { type: "global.disposed", properties: {} } })
 })
 

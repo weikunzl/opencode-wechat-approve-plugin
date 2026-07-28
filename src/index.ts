@@ -87,10 +87,6 @@ interface RuntimeTimers {
   clearInterval(id: unknown): void
 }
 
-type RuntimeEventHandler = (event: EventLike) => Promise<void>
-
-let leaseOwner: RuntimeEventHandler | null = null
-
 export function createPluginRuntime(dependencies: {
   gateway: RuntimeGateway
   approvalManager: RuntimeApprovalManager
@@ -122,7 +118,6 @@ export function createPluginRuntime(dependencies: {
   let startupTimer: unknown = null
   let expiryTimer: unknown = null
   let deactivation: Promise<void> | null = null
-  let ownerHandler: RuntimeEventHandler | null = null
   let leaderActive = false
   let eventDrainTimer: unknown = null
 
@@ -139,7 +134,6 @@ export function createPluginRuntime(dependencies: {
       if (eventDrainTimer !== null) timers.clearInterval(eventDrainTimer)
       eventDrainTimer = null
       if (dependencies.instanceRegistry && dependencies.instanceID) dependencies.instanceRegistry.dispose(dependencies.instanceID)
-      if (leaseOwner === ownerHandler) leaseOwner = null
       if (releaseLease) lease?.release()
     })()
     return deactivation
@@ -186,8 +180,7 @@ export function createPluginRuntime(dependencies: {
         return
       }
       if (!active) {
-        // 多项目实例共享一个租约，非持有者把事件交给唯一活跃实例处理。
-        if (leaseOwner && leaseOwner !== ownerHandler) await leaseOwner(event)
+        // 非原生协调器实例不处理事件，原生路径会通过 mailbox 发布。
         return
       }
       if (eventRouter && !leaderActive) {
@@ -222,8 +215,6 @@ export function createPluginRuntime(dependencies: {
         await deliver(await approvalManager.onMessage(message, () => active))
       })
       active = true
-      ownerHandler = (event) => hooks.event({ event })
-      if (lease) leaseOwner = ownerHandler
       startupTimer = timers.setTimeout(() => {
         startupTimer = null
         if (!active) return

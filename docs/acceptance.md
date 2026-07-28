@@ -1,5 +1,13 @@
 # V1 Acceptance
 
+## Native plugin migration baseline
+
+当前实现已切换为官方 OpenCode plugin 生命周期：插件不启动独立 server，不要求 `opencode web`、`opencode serve` 或 `opencode attach`。每个 OpenCode 进程注册到共享实例表；Gateway Leader 独占微信轮询和 outbox，其余实例通过共享 mailbox 发布事件。审批命令使用 requestID、ownerInstanceID 和 revision 原子 claim，再由 owner 进程通过注入式 SDK client 回写。
+
+新增自动化证据包括：事件版本归一化、共享状态 0600/损坏隔离/V1 迁移、实例注册、邮箱幂等、创建时间排序的并发 claim、Leader ingress、owner command worker、失败重试、次实例事件转发和 SDK 权限回写。旧 HTTP/内存测试仍只证明兼容协议，不代表真实微信证据。
+
+本次架构变更属于破坏性运行方式变更。发布前必须用待发布 registry 包在两个独立 OpenCode 进程中重跑受影响的 REAL-00～REAL-18；未完成真实微信文字证据的项目保持 UNVERIFIED，不得以现有 1.0.x 记录替代。
+
 ## Automated matrix
 
 `npm test` covers:
