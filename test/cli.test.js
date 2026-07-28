@@ -55,7 +55,7 @@ test("selects resolved primary agents for approval overrides", () => {
   assert.deepEqual(names, ["build", "general"])
 })
 
-test("doctor reports plugin binding model and central server independently", async () => {
+test("doctor reports plugin binding model and native shared runtime independently", async () => {
   const root = mkdtempSync(join(tmpdir(), "wechat-doctor-"))
   const configFile = join(root, "opencode.jsonc")
   const stateDirectory = join(root, "wechat-approve")
@@ -97,6 +97,8 @@ test("doctor reports plugin binding model and central server independently", asy
     plugin: { ok: true, detail: "configured" },
     binding: { ok: true, detail: "bound" },
     model: { ok: true, detail: "opencode-go/qwen3.7-max" },
-    server: { ok: true, detail: "OpenCode 1.18.2" },
+    sharedState: { ok: true, detail: "shared state directory ready" },
+    instances: { ok: true, detail: "0 active instance(s)" },
+    leader: { ok: true, detail: "not elected" },
   })
 })

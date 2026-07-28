@@ -169,15 +169,9 @@ export function patchOpenCodeConfig(source: string, patch: ConfigPatch): string 
 }
 
 function patchCoreConfig(options: CorePatchOptions): string {
-  // 只更新插件和中心服务字段，其他 JSONC 内容保持原样。
+  // 只更新 registry 插件字段，插件不再写入独立 server 配置。
   const plugins = installedPlugins(options.source, options.plugin)
-  let output = applyEdits(options.source, modify(options.source, ["plugin"], plugins, {
-    formattingOptions: options.formattingOptions,
-  }))
-  output = applyEdits(output, modify(output, ["server", "hostname"], options.hostname, {
-    formattingOptions: options.formattingOptions,
-  }))
-  return applyEdits(output, modify(output, ["server", "port"], options.port, {
+  return applyEdits(options.source, modify(options.source, ["plugin"], plugins, {
     formattingOptions: options.formattingOptions,
   }))
 }

@@ -5,7 +5,7 @@
 [![Node.js >=20](https://img.shields.io/badge/Node.js-%3E%3D20-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
 [![License](https://img.shields.io/github/license/weikunzl/opencode-wechat-approve-plugin.svg)](LICENSE)
 
-通过微信接收一个中心 OpenCode 服务中所有会话的完成、失败、取消和权限审批通知。
+通过微信接收多个 OpenCode 原生插件实例的完成、失败、取消和权限审批通知。
 
 V1 是通知与审批插件，不是聊天机器人：普通微信消息不会创建、继续或提示任何 OpenCode 会话。
 
@@ -23,41 +23,22 @@ V1 是通知与审批插件，不是聊天机器人：普通微信消息不会�
 
 ## 运行结构
 
-V1 使用一个固定的中心服务：
+插件遵循 OpenCode 原生 plugin 生命周期。每个项目会加载一个插件实例，实例通过共享状态目录注册；只有一个带租约的 Leader 负责微信长轮询和 outbox，其余实例发布事件并接收路由结果：
 
 ```text
-opencode web / serve 127.0.0.1:4096
-├── project A sessions
-├── project B sessions
-└── project C sessions
+OpenCode instance A ─┐
+OpenCode instance B ─┼─ shared mailbox ── Gateway Leader ── WeChat
+OpenCode instance C ─┘
 ```
 
-只启动一次：
-
-```bash
-opencode web
-```
-
-其他终端连接同一个服务：
-
-```bash
-opencode attach http://127.0.0.1:4096 --dir /absolute/path/to/project
-```
-
-Windows PowerShell：
-
-```powershell
-opencode attach http://127.0.0.1:4096 --dir C:\workspace\project
-```
-
-不要为每个项目单独执行 `opencode web`。独立服务拥有独立事件流，无法由一个插件实例天然合并。
+不需要 `opencode web`、`opencode serve`、`opencode attach` 或固定 4096 端口。多个独立 OpenCode 会话可直接共用同一个绑定。
 
 ## 安装
 
 要求：
 
 - Node.js 20 或更高版本
-- OpenCode 1.x，且支持 `plugin`、`web` 和 `attach`
+- OpenCode 1.x，且支持官方 `plugin` hook 与注入式 SDK client
 - 支持 iLink Bot 的微信账号
 
 执行：
@@ -71,33 +52,18 @@ npx @wekux/opencode-wechat-approve-plugin install
 1. 读取 OpenCode 的真实全局配置目录；
 2. 检查已安装模型并要求确认审批解释模型；
 3. 保留 JSONC 注释和其他插件配置；
-4. 写入中心服务默认地址 `127.0.0.1:4096`；
-5. 自动为全局规则及已解析的主 agent 写入 `bash: ask`，保留已有的更具体命令例外和显式 `deny`；
-6. 显示微信二维码；
-7. 扫码确认后等待用户向机器人发送固定文本 `绑定`；
-8. 发送测试通知，成功后才完成安装。
+4. 自动为全局规则及已解析的主 agent 写入 `bash: ask`，保留已有的更具体命令例外和显式 `deny`；
+5. 显示微信二维码；
+6. 扫码确认后等待用户向机器人发送固定文本 `绑定`；
+7. 发送测试通知，成功后才完成安装。
 
 安装器会把当前发布版本的 npm registry 规格（例如
 `@wekux/opencode-wechat-approve-plugin@1.0.5`）写入 OpenCode 的 `plugin` 数组，
 不会把本地 `file://` 托管副本作为最终插件入口。
 
-安装完成后重新启动 `opencode web` 或新建 OpenCode 会话，使自动写入的审批规则参与权限计算；不需要手工编辑 agent 配置。
+安装完成后重新启动 OpenCode 会话，使自动写入的审批规则参与权限计算；不需要启动独立 server。
 
 扫码绑定的是实际微信用户 ID 和 iLink `context_token`，产品不会硬编码联系人名称。
-
-建议在启动中心服务前设置密码：
-
-```bash
-export OPENCODE_SERVER_PASSWORD='use-a-strong-password'
-opencode web
-```
-
-PowerShell：
-
-```powershell
-$env:OPENCODE_SERVER_PASSWORD = 'use-a-strong-password'
-opencode web
-```
 
 ## 审批回复
 
@@ -135,7 +101,9 @@ npx @wekux/opencode-wechat-approve-plugin doctor
 - 全局插件配置
 - 微信账号与绑定上下文
 - 已确认模型是否仍可用
-- `127.0.0.1:4096/global/health`
+- 共享状态目录权限
+- 已注册插件实例数量
+- 当前 Leader 租约摘要
 
 补充或恢复绑定：
 
@@ -147,11 +115,11 @@ npx @wekux/opencode-wechat-approve-plugin bind
 
 | 现象 | 处理 |
 | --- | --- |
-| `ServeError` 或端口变化 | 确认只启动一个 `opencode web`，检查 4096 是否被其他进程占用 |
+| 多个实例没有通知 | 确认各 OpenCode 会话均加载相同 registry 插件规格，并运行 `doctor` 检查实例和 Leader |
 | `Model not found: opencode/...` | 运行 `doctor`，重新安装并选择 `opencode models` 中存在的完整 provider/model |
 | 能收到旧消息但收不到主动通知 | 运行 `bind`，向机器人发送一次固定文本 `绑定` |
-| `sendmessage` 返回 `prepare failed` | 先查看日志中的 `ret`、`errcode`、`errmsg`、`baseHost` 和 `contextAgeMs`；若为 `-14`，运行 `npx @wekux/opencode-wechat-approve-plugin bind` 强制扫码并发送 `绑定`，再重启 `opencode web`；其他错误可向绑定用户发送一条新消息刷新上下文，outbox 会等待新 context 后重试，不会在旧 context 上连续重试 |
-| 多项目重复通知 | 让其他终端使用 `opencode attach`；插件租约会禁用同一状态目录下的次实例 |
+| `sendmessage` 返回 `prepare failed` | 先查看脱敏 `ret`、`errcode`、`errmsg`、`baseHost` 和 `contextAgeMs`；若为 `-14`，运行 `bind` 重新扫码并发送 `绑定`；其他错误等待新入站 context 后由 outbox 重试 |
+| 多项目重复通知 | 检查共享状态目录权限和 Leader 租约；实例事件通过 mailbox 去重，不需要 attach |
 | 微信回复“继续”没有反应 | 这是 V1 的预期行为；普通消息不会驱动 AI 会话 |
 
 ## 本地状态
@@ -168,6 +136,9 @@ npx @wekux/opencode-wechat-approve-plugin bind
 ├── context-invalid.json       # iLink -14 后生成，重新绑定或收到新 context 后清除
 ├── processed-messages.json
 ├── runtime.json
+├── shared-mailbox-v1.json
+├── plugin-instances-v1.json
+├── approval-index-v1.json
 └── runtime-lease.json
 ```
 

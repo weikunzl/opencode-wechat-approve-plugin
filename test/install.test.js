@@ -35,7 +35,7 @@ test("preserves JSONC comments and unrelated settings while installing idempoten
   assert.match(twice, /keep this formatter/)
   assert.match(twice, /"formatter": \{ "prettier": \{\} \}/)
   assert.equal((twice.match(/opencode-wechat-approve-plugin/g) ?? []).length, 1)
-  assert.match(twice, /"port": 4096/)
+  assert.match(twice, /"port": 9000/)
 })
 
 test("installs approval-safe bash rules without discarding agent exceptions", () => {

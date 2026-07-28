@@ -92,7 +92,7 @@ async function main(args: string[]): Promise<number> {
     terminal.close()
   }
   process.stdout.write(`安装完成。插件 ${PACKAGE_NAME} 已写入全局配置。\n`)
-  process.stdout.write("使用 opencode web 启动 127.0.0.1:4096；其他终端使用 opencode attach。\n")
+  process.stdout.write("请分别启动 OpenCode 会话；插件会自动共享绑定并选举微信网关 Leader。\n")
   return 0
 }
 
@@ -170,7 +170,7 @@ function printHelp(): void {
     [
       "wechat-approve install   配置插件、确认模型并扫码绑定",
       "wechat-approve bind      重新扫码或补充绑定消息",
-      "wechat-approve doctor    检查插件、模型、绑定和中心服务",
+      "wechat-approve doctor    检查插件、模型、绑定和共享运行时",
       "",
     ].join("\n"),
   )

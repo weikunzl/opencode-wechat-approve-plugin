@@ -2,7 +2,7 @@ import fs from "node:fs"
 import path from "node:path"
 import { parse } from "jsonc-parser"
 import { isOwnedPluginSpec } from "./install.js"
-import { openCodeAuthorization, openCodeHeaders } from "./server-auth.js"
+import { PluginInstanceRegistry } from "./plugin-instance.js"
 import { WeChatStore } from "./store.js"
 
 export interface OpenCodePaths {
@@ -25,7 +25,9 @@ export interface DoctorResult {
   plugin: Check
   binding: Check
   model: Check
-  server: Check
+  sharedState: Check
+  instances: Check
+  leader: Check
 }
 
 export function parseOpenCodePaths(output: string): OpenCodePaths {
@@ -96,36 +98,19 @@ export async function doctorInstallation(options: {
               : "not configured",
         }
 
-  const serverConfig = asRecord(pluginConfig)?.server
-  const serverRecord = asRecord(serverConfig)
-  const hostname = typeof serverRecord?.hostname === "string" ? serverRecord.hostname : "127.0.0.1"
-  const port = typeof serverRecord?.port === "number" ? serverRecord.port : 4096
-  let server: Check
-  try {
-    const response = await (options.fetcher ?? fetch)(
-      new URL("/global/health", `http://${formatHost(hostname)}:${port}`),
-      {
-        headers: openCodeHeaders(
-          undefined,
-          options.authorization ?? openCodeAuthorization(),
-        ),
-        signal: AbortSignal.timeout(3_000),
-      },
-    )
-    const body = asRecord(await response.json())
-    server =
-      response.ok && body?.healthy === true
-        ? { ok: true, detail: `OpenCode ${String(body.version || "healthy")}` }
-        : { ok: false, detail: `unhealthy: HTTP ${response.status}` }
-  } catch (error) {
-    server = { ok: false, detail: firstLine(error) }
-  }
+  const registry = new PluginInstanceRegistry(options.stateDirectory)
+  const instances = registry.list()
+  const sharedState = { ok: fs.existsSync(options.stateDirectory), detail: "shared state directory ready" }
+  const activeInstances = instances.filter((item) => item.status === "active").length
+  const leader = readLeaderCheck(options.stateDirectory)
 
   return {
     plugin: { ok: configured, detail: configured ? "configured" : "not configured" },
     binding: { ok: bound, detail: bound ? "bound" : "not bound" },
     model,
-    server,
+    sharedState,
+    instances: { ok: true, detail: `${activeInstances} active instance(s)` },
+    leader,
   }
 }
 
@@ -143,10 +128,18 @@ function asRecord(value: unknown): Record<string, unknown> | null {
     : null
 }
 
-function formatHost(hostname: string): string {
-  return hostname.includes(":") && !hostname.startsWith("[") ? `[${hostname}]` : hostname
-}
-
 function firstLine(error: unknown): string {
   return (error instanceof Error ? error.message : String(error)).split(/\r?\n/, 1)[0]
+}
+
+function readLeaderCheck(directory: string): Check {
+  // doctor 只读取租约摘要，不发起网络请求也不改变租约归属。
+  const file = path.join(directory, "runtime-lease.json")
+  if (!fs.existsSync(file)) return { ok: true, detail: "not elected" }
+  try {
+    const value = JSON.parse(fs.readFileSync(file, "utf8")) as Record<string, unknown>
+    return typeof value.instanceID === "string" ? { ok: true, detail: "leader lease present" } : { ok: false, detail: "invalid leader lease" }
+  } catch (error) {
+    return { ok: false, detail: firstLine(error) }
+  }
 }
