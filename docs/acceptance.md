@@ -22,11 +22,11 @@
 
 REAL-00 至 REAL-18 的安全与恢复验收矩阵、受影响/全量执行档位和截图索引格式见 [`docs/approval-security-matrix.md`](approval-security-matrix.md)；用户手工发送时遵循 [`docs/manual-live-acceptance.md`](manual-live-acceptance.md)。真实 live 仍必须逐项观察微信原文，不能用 fake model、HTTP 或内存结果替代。
 
-本轮诊断已确认：registry 1.0.5 已包含租约持有者事件转发，服务也已重启加载该 registry spec；但屏幕标题显示“微信 ClawBot”（含空格），不符合严格“微信ClawBot”，因此未发送诊断原文。REAL-00 为 `BLOCKED`，REAL-01 至 REAL-18 为 `UNVERIFIED`（历史 1.0.2 记录保持原版本标注）。
+本轮诊断已确认：registry 1.0.5 已包含租约持有者事件转发，服务也已重启加载该 registry spec。人工模式允许以用户明确文字确认和对应时间点的对话记录作为证据，不要求认证截图；严格/自动化 PASS 仍要求场景截图。当前 REAL-00 缺少可校验的时间对应对话记录，因此为 `UNVERIFIED`；严格模式仍因标题“微信 ClawBot”（含空格）阻塞。REAL-01 至 REAL-18 为 `UNVERIFIED`（历史 1.0.2 记录保持原版本标注）。
 
-发布前必须根据 [`docs/release-impact-1.0.5.md`](release-impact-1.0.5.md) 识别受影响场景；受影响场景全部真实重跑并取得脱敏微信截图后才能发布。用户可以选择按矩阵执行 REAL-00～REAL-18 全量真实回归；任一真实线程 `BLOCKED` 或 `UNVERIFIED` 都不能改写为通过。
+发布前必须根据 [`docs/release-impact-1.0.5.md`](release-impact-1.0.5.md) 识别受影响场景；严格/自动化场景需真实重跑并取得脱敏微信截图，人工场景需取得对应时间点的脱敏对话记录。用户可以选择按矩阵执行 REAL-00～REAL-18 全量真实回归；任一真实线程 `BLOCKED` 或 `UNVERIFIED` 都不能改写为通过。
 
-人工协作模式下，用户每条场景开始前必须以真实线程文字确认目标会话和绑定身份；该确认不要求单独认证截图。真实线程仍须保留原始窗口标题和确认结果，且每个场景 `PASS` 必须有微信对话截图。标题含空格时可记录 `MANUAL_CONFIRMED`，但不能伪装为严格标题 `PASS`。主线程只接受包含版本、标题、确认、微信原文摘要、脱敏 requestID/decision、pending/outbox 前后、截图索引和清理结果的完整日志。
+人工协作模式下，用户每条场景开始前必须以真实线程文字确认目标会话和绑定身份；该确认不要求单独认证截图。真实线程仍须保留原始窗口标题和对应时间点的对话记录；自动化/严格 `PASS` 才要求微信对话截图。标题含空格时可记录 `MANUAL_CONFIRMED`，但不能伪装为严格标题 `PASS`。主线程只接受包含版本、标题、确认、原文摘要、对话记录或适用截图索引、脱敏 requestID/decision、pending/outbox 前后和清理结果的完整日志。
 
 可用 `npm run test:e2e:status` 做一轮无副作用状态扫描，或用 `npm run test:e2e:status -- --interval=30000` 周期扫描 OpenCode pending、本地 pending/outbox 和 context 年龄。扫描器不会读取微信屏幕，也不会自动把任何真实场景标记为通过；每轮仍需人工记录微信原文、脱敏 requestID/decision 和清理结果。
 

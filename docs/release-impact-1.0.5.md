@@ -22,11 +22,11 @@
 
 ## 真实验收交接
 
-真实执行线程必须逐项回传：场景 ID、registry 版本、原始窗口标题、用户目标会话/绑定确认、微信可见原文、脱敏 `requestID=decision`、pending/outbox 前后数量、截图索引、清理结果和时间戳。本线程在收到这些证据前不修改 REAL-00 至 REAL-18 或 SEC 场景状态，也不并发操作微信会话。人工协作规则见 [`docs/manual-live-acceptance.md`](manual-live-acceptance.md)。
+真实执行线程必须逐项回传：场景 ID、registry 版本、原始窗口标题、用户目标会话/绑定确认、微信可见原文、脱敏 `requestID=decision`、pending/outbox 前后数量、适用的截图或对话记录索引、清理结果和时间戳。本线程在收到这些证据前不修改 REAL-00 至 REAL-18 或 SEC 场景状态，也不并发操作微信会话。人工协作规则见 [`docs/manual-live-acceptance.md`](manual-live-acceptance.md)。
 
-用户人工身份确认以真实线程中的明确文字为证据，不要求单独认证截图；但每个真实 `PASS` 仍必须关联一张脱敏微信对话截图索引。截图只能包含目标会话，不得包含其他聊天、token、context token、二维码或绑定信息。任一真实场景为 `BLOCKED`/`UNVERIFIED` 或缺少场景截图时，发布状态必须保持阻塞。
+用户人工身份确认以真实线程中的明确文字和对应时间点的脱敏对话记录为证据，不要求单独认证截图；自动化/严格 `PASS` 才必须关联微信对话截图索引。截图或对话记录只能对应目标会话，不得包含其他聊天、token、context token、二维码或绑定信息。任一真实场景为 `BLOCKED`/`UNVERIFIED` 或缺少适用证据时，发布状态必须保持阻塞。
 
-当前门禁仍为 `BLOCKED`：屏幕标题观察到“微信 ClawBot”（含空格），不满足严格标题 `微信ClawBot`，因此没有发送诊断通知，也没有真实 request ID/decision 证据。pending 与 outbox 均为 0，不能据此宣称 REAL-00 通过。
+当前严格模式门禁仍为 `BLOCKED`：屏幕标题观察到“微信 ClawBot”（含空格），不满足严格标题 `微信ClawBot`。人工模式的 REAL-00 仍缺少可校验的时间对应对话记录，因此保持 `UNVERIFIED`；不能据此宣称通过。
 
 ## 安全与回滚边界
 
