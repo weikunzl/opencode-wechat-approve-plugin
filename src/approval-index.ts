@@ -77,13 +77,19 @@ export class ApprovalIndex {
     return this.mark(input, ApprovalStatus.FailedRetryable)
   }
 
+  markStale(input: RevisionInput): boolean {
+    // 原生 OpenCode 已处理的请求标记为 stale，阻止旧命令再次授权。
+    return this.mark(input, ApprovalStatus.Stale)
+  }
+
   private mark(input: RevisionInput, status: ApprovalStatus): boolean {
     return this.update((records) => {
       const item = records.find((candidate) => candidate.requestID === input.requestID)
-      const valid = Boolean(item && item.status === ApprovalStatus.Claimed && item.revision === input.expectedRevision)
+      const retrying = status === ApprovalStatus.Applied && item?.status === ApprovalStatus.FailedRetryable
+      const valid = Boolean(item && (item.status === ApprovalStatus.Claimed || retrying) && item.revision === input.expectedRevision)
       if (valid && item) {
         item.status = status
-        item.revision += 1
+        if (status !== ApprovalStatus.FailedRetryable) item.revision += 1
       }
       return { records, result: valid }
     })

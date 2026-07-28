@@ -54,9 +54,9 @@ export class SharedMailbox {
     return this.read().filter((record) => record.kind === MailboxRecordKind.Event)
   }
 
-  readCommands(instanceID: string): MailboxRecord[] {
+  readCommands(instanceID: string): Array<Extract<MailboxRecord, { kind: MailboxRecordKind.Command }>> {
     // 只返回当前实例拥有的命令，避免跨项目误应用权限。
-    return this.read().filter((record) => isCommandRecord(record) && record.ownerInstanceID === instanceID)
+    return this.read().filter(isCommandRecord).filter((record) => record.ownerInstanceID === instanceID)
   }
 
   acknowledgeCommand(commandID: string): void {
