@@ -58,7 +58,7 @@ npx @wekux/opencode-wechat-approve-plugin install
 7. 发送测试通知，成功后才完成安装。
 
 安装器会把当前发布版本的 npm registry 规格（例如
-`@wekux/opencode-wechat-approve-plugin@1.0.5`）写入 OpenCode 的 `plugin` 数组，
+`@wekux/opencode-wechat-approve-plugin@2.0.0`）写入 OpenCode 的 `plugin` 数组，
 不会把本地 `file://` 托管副本作为最终插件入口。
 
 安装完成后重新启动 OpenCode 会话，使自动写入的审批规则参与权限计算；不需要启动独立 server。

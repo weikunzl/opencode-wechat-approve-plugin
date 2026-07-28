@@ -1,6 +1,6 @@
 # 真实审批与安全场景矩阵
 
-这是 registry `@wekux/opencode-wechat-approve-plugin@1.0.6` 的验收基线。总清单固定为 REAL-00～REAL-18，共 19 项。严格屏幕 PASS 使用 `evidenceMode=SCREEN`；人工模式在文字字段完整且符合预期时使用 `status=PASS`、`evidenceMode=MANUAL_REPORTED`，不要求截图。`MANUAL_CONFIRMED` 仅表示身份确认，不能单独通过。HTTP/内存集成和 fake model 只能证明自动化行为；缺少微信原文文字一律是 `UNVERIFIED` 或 `BLOCKED`。详见 [`docs/manual-live-acceptance.md`](manual-live-acceptance.md)。
+这是 registry `@wekux/opencode-wechat-approve-plugin@2.0.0` 的原生插件验收基线。总清单固定为 REAL-00～REAL-18，共 19 项。严格屏幕 PASS 使用 `evidenceMode=SCREEN`；人工模式在文字字段完整且符合预期时使用 `status=PASS`、`evidenceMode=MANUAL_REPORTED`，不要求截图。`MANUAL_CONFIRMED` 仅表示身份确认，不能单独通过。HTTP/内存集成和 fake model 只能证明自动化行为；缺少微信原文文字一律是 `UNVERIFIED` 或 `BLOCKED`。详见 [`docs/manual-live-acceptance.md`](manual-live-acceptance.md)。
 
 所有场景的最小统一记录字段为：`scenarioID`、`status`、`evidenceMode`、微信原文、`requestID-decision`、pending 前后、outbox 前后、清理结果和阻塞原因。结构化日志可使用现有英文键名，但不得省略这些语义字段。
 
@@ -8,8 +8,8 @@
 
 | ID | 前置条件 | 操作 | 可观察预期 | 自动化证据 | 真实状态 / 文字证据 |
 | --- | --- | --- | --- | --- | --- |
-| REAL-00 | registry 1.0.5、绑定、doctor | 发送无副作用诊断通知 | 微信可见原文，context 有效，outbox 可清空 | 网关/CLI 测试 | `PASS`；`evidenceMode=MANUAL_REPORTED`，原始标题为“微信 ClawBot” |
-| REAL-01 | registry 1.0.5、已绑定、可执行会话 | 执行无副作用任务 | 微信仅出现一次 Done，任务完成 | `session-notifier.test.js` | `PASS`；`evidenceMode=MANUAL_REPORTED`，已观察 `[Done] REAL-01 manual approval` |
+| REAL-00 | registry 2.0.0、绑定、doctor | 发送无副作用诊断通知 | 微信可见原文，context 有效，outbox 可清空 | 网关/CLI 测试 | `UNVERIFIED`；需用 2.0.0 registry 重新取证 |
+| REAL-01 | registry 2.0.0、已绑定、可执行会话 | 执行无副作用任务 | 微信仅出现一次 Done，任务完成 | `session-notifier.test.js` | `UNVERIFIED`；需用 2.0.0 registry 重新取证 |
 | REAL-02 | 多 pending | “那个先做一下” | 澄清目标；pending `2→2` | `semantic-approval.test.js` | `UNVERIFIED`；文字证据待真实线程 |
 | REAL-03 | 单 pending | “不要放行这个操作” | 仅 reject，不得 once/always | `approval-manager.test.js` | `UNVERIFIED`；文字证据待真实线程 |
 | REAL-04 | 多 pending | “不要放行” | 不批量拒绝，继续澄清 | `semantic-approval.test.js` | `UNVERIFIED`；文字证据待真实线程 |
@@ -40,7 +40,7 @@
 
 ## 文字证据索引格式
 
-真实线程每完成一项，在受控文字证据索引中新增一行；人工模式不要求截图，文档只保存脱敏文字：
+真实线程每完成一项，在受控文字证据索引中新增一行；人工模式不要求截图，文档只保存脱敏文字。以下是历史 1.0.5 记录，不作为 2.0.0 门禁：
 
 | 场景 ID | 状态 | evidenceMode | registry 版本 | 原始窗口标题 | MANUAL_CONFIRMED | 用户确认 | 微信可见原文 | requestID=decision | pending 前→后 | outbox 前→后 | 清理结果 | 操作者时间 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -53,6 +53,6 @@
 
 每项结束后必须用明确“第 N 个拒绝”或“拒绝”清空 pending；清理失败即停止并标记 `BLOCKED`。`npm run test:e2e:status` 默认做一轮无副作用扫描，`npm run test:e2e:status -- --interval=30000` 才会周期运行；它只输出 pending/outbox/context 年龄，微信标题和原文仍需人工观察，不会把状态标为通过。
 
-历史 REAL-00 和 REAL-01 的 `1.0.5` 文字证据保持有效，但不覆盖本版本安装器变更。`1.0.6` 安装器会把 `bash: ask` 写入全局与已解析主 agent，避免 agent 级 `*/*=allow` 覆盖审批前置条件；REAL-02 至 REAL-14 必须在 registry `1.0.6` 安装、重启或新建会话后重新验证 `permission.asked` 和 pending，再逐项取证。旧 QR 绑定进程已停止，避免竞争 context。
+历史 REAL-00 和 REAL-01 的 `1.0.5` 文字证据不覆盖本版本；REAL-00 至 REAL-18 必须在 registry `2.0.0` 安装、重启或新建会话后重新验证 `permission.asked`、pending 和跨进程路由。旧 QR 绑定进程已停止，避免竞争 context。
 
 主线程按 [`docs/manual-live-acceptance.md`](manual-live-acceptance.md) 扫描真实线程日志；任何缺字段或 `BLOCKED`/`UNVERIFIED` 记录都不得转成通过。

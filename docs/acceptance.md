@@ -1,8 +1,8 @@
-# V1 Acceptance
+# V2 Acceptance
 
 ## Native plugin migration baseline
 
-当前实现已切换为官方 OpenCode plugin 生命周期：插件不启动独立 server，不要求 `opencode web`、`opencode serve` 或 `opencode attach`。每个 OpenCode 进程注册到共享实例表；Gateway Leader 独占微信轮询和 outbox，其余实例通过共享 mailbox 发布事件。审批命令使用 requestID、ownerInstanceID 和 revision 原子 claim，再由 owner 进程通过注入式 SDK client 回写。
+当前 2.0.0 实现已切换为官方 OpenCode plugin 生命周期：插件不启动独立 server，不要求 `opencode web`、`opencode serve` 或 `opencode attach`。每个 OpenCode 进程注册到共享实例表；Gateway Leader 独占微信轮询和 outbox，其余实例通过共享 mailbox 发布事件。审批命令使用 requestID、ownerInstanceID 和 revision 原子 claim，再由 owner 进程通过注入式 SDK client 回写。
 
 新增自动化证据包括：事件版本归一化、共享状态 0600/损坏隔离/V1 迁移、实例注册、邮箱幂等、创建时间排序的并发 claim、Leader ingress、owner command worker、失败重试、次实例事件转发和 SDK 权限回写。旧 HTTP/内存测试仍只证明兼容协议，不代表真实微信证据。
 
@@ -30,9 +30,9 @@
 
 REAL-00 至 REAL-18 的安全与恢复验收矩阵、受影响/全量执行档位和文字证据索引格式见 [`docs/approval-security-matrix.md`](approval-security-matrix.md)；用户手工发送时遵循 [`docs/manual-live-acceptance.md`](manual-live-acceptance.md)。真实 live 仍必须逐项观察微信原文，不能用 fake model、HTTP 或内存结果替代。
 
-本轮诊断已确认：registry 1.0.5 已包含租约持有者事件转发，服务也已重启加载该 registry spec。严格屏幕证据使用 `evidenceMode=SCREEN`；人工模式使用结构化文字证据，不要求截图。REAL-00 已消费 retry-00 的完整字段；用户将 REAL-01 重定义为“任务执行完成即可”，因此已消费 `[Done] REAL-01 manual approval` 并标记 `status=PASS`、`evidenceMode=MANUAL_REPORTED`。两者都不等同于屏幕证据；REAL-02 至 REAL-18 尚未执行。
+此前 1.0.x 的人工文字记录仅作为历史参考，不覆盖本次 2.0.0 原生插件迁移。严格屏幕证据使用 `evidenceMode=SCREEN`；人工模式使用结构化文字证据，不要求截图。REAL-00～REAL-18 必须使用 2.0.0 registry 包重新验收，未完成的项目保持 `UNVERIFIED`。
 
-发布前必须根据 [`docs/release-impact-1.0.6.md`](release-impact-1.0.6.md) 识别受影响场景；严格标题场景需 `PASS + SCREEN`，人工场景需符合预期的完整结构化文字证据并标记 `PASS + MANUAL_REPORTED`。用户可以选择按矩阵执行 REAL-00～REAL-18 全量真实回归；任一真实线程 `BLOCKED` 或 `UNVERIFIED` 都不能改写为通过。`1.0.6` 安装器会为已解析主 agent 自动写入最终生效的 `bash: ask`，因此 REAL-02 至 REAL-14 必须在 registry 安装、重启或新建会话后验证 `permission.asked` 与 pending=1，才能继续。
+发布前必须根据 [`docs/release-impact-2.0.0.md`](release-impact-2.0.0.md) 识别受影响场景；严格标题场景需 `PASS + SCREEN`，人工场景需符合预期的完整结构化文字证据并标记 `PASS + MANUAL_REPORTED`。用户可以选择按矩阵执行 REAL-00～REAL-18 全量真实回归；任一真实线程 `BLOCKED` 或 `UNVERIFIED` 都不能改写为通过。
 
 人工协作模式下，用户每条场景开始前必须以真实线程文字确认目标会话和绑定身份；真实线程须保留原始窗口标题、用户确认、微信原文、脱敏决策、pending/outbox、清理结果和操作者时间。`MANUAL_CONFIRMED` 仅表示身份确认；字段完整且符合预期时标记 `PASS + MANUAL_REPORTED`。主线程只接受完整结构化文字日志。
 
@@ -50,7 +50,7 @@ npm run test:e2e:live
 
 该入口是扫码后的人工安全记录器，不会自动触发 OpenCode E2E，也不会代替真实会话断言。它每次先强制 bind，显示二维码并要求用户扫码确认；随后操作者必须在会话标题为 `微信ClawBot` 的窗口发送精确文本 `绑定`。脚本确认新的 context 已收到后，才提示人工执行 LIVE-01 至 LIVE-06。每个场景开始前都重新确认标题，并记录扫码时间、场景、微信文本、`requestID=decision` 列表和 pending 前后数量；不得记录 token、二维码或本地状态文件。
 
-## Real WeChat acceptance
+## Historical 1.0.x WeChat evidence
 
 registry 包 `@wekux/opencode-wechat-approve-plugin@1.0.2` 已在标题严格为 `微信ClawBot` 的真实会话中完成主要审批链路。观察记录如下（不含 token/context）：
 
