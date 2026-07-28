@@ -16,7 +16,7 @@ const pending = [
   },
 ]
 
-test("uses a temporary tool-disabled structured session and deletes it", async () => {
+test("parses a JSON text response without sending an unsupported output format", async () => {
   const requests = []
   const internal = new Set()
   const client = {
@@ -24,7 +24,7 @@ test("uses a temporary tool-disabled structured session and deletes it", async (
       create: async (options) => { requests.push(["create", options]); return { data: { id: "ses-internal" } } },
       prompt: async (options) => {
         requests.push(["prompt", options])
-        return { data: { info: { structured: { requestIDs: ["req-1"], decision: "once", confidence: 0.97, explanation: "明确允许 npm test" } } } }
+        return { data: { parts: [{ type: "text", text: '{"requestIDs":["req-1"],"decision":"once","confidence":0.97,"explanation":"明确允许 npm test"}' }] } }
       },
       delete: async (options) => { requests.push(["delete", options]); return { data: true } },
     },
@@ -48,6 +48,7 @@ test("uses a temporary tool-disabled structured session and deletes it", async (
     modelID: "qwen3.7-max",
   })
   assert.deepEqual(requests[1][1].body.tools, {})
+  assert.equal("format" in requests[1][1].body, false)
   assert.equal(requests.at(-1)[0], "delete")
   assert.deepEqual([...internal], [])
 })
@@ -80,7 +81,7 @@ test("uses the injected OpenCode client for model sessions", async () => {
       create: async (options) => { calls.push(["create", options]); return { data: { id: "ses-sdk" } } },
       prompt: async (options) => {
         calls.push(["prompt", options])
-        return { data: { info: { structured: { requestIDs: ["req-1"], decision: "once", confidence: 0.97, explanation: "ok" } } } }
+        return { data: { parts: [{ type: "text", text: '{"requestIDs":["req-1"],"decision":"once","confidence":0.97,"explanation":"ok"}' }] } }
       },
       delete: async (options) => { calls.push(["delete", options]); return { data: true } },
     },

@@ -61,7 +61,8 @@ function isStrictSelectionReply(text: string): boolean {
 
 export function parseApprovalDecision(text: string): "once" | "always" | "reject" | null {
   const source = text.normalize("NFKC").trim().toLowerCase()
-  if (/[?？]/.test(source) || /(?:可以|确认|通过|允许|同意)吗(?:\s|$)/.test(source)) return null
+  // 疑问句优先于否定词，避免“要不要”中的“不要”被判为拒绝。
+  if (/[?？]/.test(source) || /要不要|(?:可以|确认|通过|允许|同意)吗(?:\s|$)/.test(source)) return null
   text = normalize(text)
   if (REJECT.test(text)) return "reject"
   if (NEGATED_APPROVAL.test(text)) return "reject"
