@@ -146,6 +146,49 @@ test("forwards secondary project events to the lease owner", async () => {
   await owner.hooks.event({ event: { type: "global.disposed", properties: {} } })
 })
 
+test("accepts the current permission.updated event shape", async () => {
+  const gateway = createGateway()
+  const received = []
+  const runtime = createPluginRuntime({
+    gateway,
+    approvalManager: {
+      reconcile: async () => [],
+      onPermissionAsked: async (event) => {
+        received.push(event)
+        return []
+      },
+      onPermissionReplied: async () => {},
+      onMessage: async () => [],
+    },
+    sessionNotifier: { handle: async () => [] },
+  })
+
+  await runtime.start()
+  await runtime.hooks.event({
+    event: {
+      type: "permission.updated",
+      properties: {
+        id: "req-current",
+        sessionID: "ses-current",
+        type: "bash",
+        pattern: "npm test",
+        metadata: { directory: "/workspace" },
+      },
+    },
+  })
+
+  assert.deepEqual(received, [{
+    type: "permission.asked",
+    properties: {
+      id: "req-current",
+      sessionID: "ses-current",
+      permission: "bash",
+      patterns: ["npm test"],
+      metadata: { directory: "/workspace" },
+    },
+  }])
+})
+
 test("periodically rejects expired approvals and stops the timer on disposal", async () => {
   const gateway = createGateway()
   let tick

@@ -5,6 +5,8 @@ import type { NotificationEnvelope } from "./domain.js"
 import { InternalSessionRegistry } from "./internal-session-registry.js"
 import { HttpPermissionAPI } from "./opencode-permissions.js"
 import { OpenCodeApprovalModel } from "./opencode-model.js"
+import { normalizeOpenCodeEvent } from "./event-normalizer.js"
+import { NormalizedEventKind } from "./plugin-types.js"
 import { RuntimeLease } from "./runtime-lease.js"
 import { SessionNotifier } from "./session-notifier.js"
 import { WeChatStore } from "./store.js"
@@ -138,14 +140,14 @@ export function createPluginRuntime(dependencies: {
         if (leaseOwner && leaseOwner !== ownerHandler) await leaseOwner(event)
         return
       }
-      if (isPermissionAsked(event)) {
-        await deliver(await approvalManager.onPermissionAsked(event))
+      const normalized = normalizeOpenCodeEvent(event)
+      if (normalized?.kind === NormalizedEventKind.PermissionAsked) {
+        await deliver(await approvalManager.onPermissionAsked(toPermissionAsked(normalized)))
         return
       }
 
-      const replied = normalizePermissionReplied(event)
-      if (replied) {
-        await approvalManager.onPermissionReplied(replied)
+      if (normalized?.kind === NormalizedEventKind.PermissionReplied) {
+        await approvalManager.onPermissionReplied(toPermissionReplied(normalized))
         return
       }
 
@@ -259,34 +261,25 @@ export const WeChatPlugin: Plugin = async (input) => {
   return runtime.hooks as Awaited<ReturnType<Plugin>>
 }
 
-function isPermissionAsked(event: EventLike): event is PermissionAskedLike {
-  if (event.type !== "permission.asked" || !event.properties) return false
-  return (
-    typeof event.properties.id === "string" &&
-    typeof event.properties.sessionID === "string" &&
-    typeof event.properties.permission === "string" &&
-    Array.isArray(event.properties.patterns)
-  )
+function toPermissionAsked(event: Extract<ReturnType<typeof normalizeOpenCodeEvent>, { kind: NormalizedEventKind.PermissionAsked }>): PermissionAskedLike {
+  // 兼容旧 ApprovalManager 输入结构，集中完成字段映射。
+  return {
+    type: "permission.asked",
+    properties: {
+      id: event.id,
+      sessionID: event.sessionID,
+      permission: event.permission,
+      patterns: event.patterns,
+      ...(event.metadata ? { metadata: event.metadata } : {}),
+    },
+  }
 }
 
-function normalizePermissionReplied(event: EventLike): PermissionRepliedLike | null {
-  if (event.type !== "permission.replied" || !event.properties) return null
-  const requestID = event.properties.requestID ?? event.properties.permissionID
-  const reply = event.properties.reply ?? event.properties.response
-  if (
-    typeof event.properties.sessionID !== "string" ||
-    typeof requestID !== "string" ||
-    !["once", "always", "reject"].includes(String(reply))
-  ) {
-    return null
-  }
+function toPermissionReplied(event: Extract<ReturnType<typeof normalizeOpenCodeEvent>, { kind: NormalizedEventKind.PermissionReplied }>): PermissionRepliedLike {
+  // 统一新版 permissionID/response 与旧字段，保持审批状态机不变。
   return {
     type: "permission.replied",
-    properties: {
-      sessionID: event.properties.sessionID,
-      requestID,
-      reply: reply as "once" | "always" | "reject",
-    },
+    properties: { sessionID: event.sessionID, requestID: event.requestID, reply: event.reply },
   }
 }
 
