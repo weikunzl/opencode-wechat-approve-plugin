@@ -4,7 +4,8 @@ import { ApprovalManager } from "./approval-manager.js"
 import { IlinkClientTransport } from "./client.js"
 import type { NotificationEnvelope } from "./domain.js"
 import { InternalSessionRegistry } from "./internal-session-registry.js"
-import { HttpPermissionAPI } from "./opencode-permissions.js"
+import { OpenCodePermissionAdapter } from "./opencode-adapter.js"
+import { SdkPermissionAPI } from "./sdk-permissions.js"
 import { OpenCodeApprovalModel } from "./opencode-model.js"
 import { normalizeOpenCodeEvent } from "./event-normalizer.js"
 import { NormalizedEventKind } from "./plugin-types.js"
@@ -312,7 +313,7 @@ export const WeChatPlugin: Plugin = async (input) => {
     : null
   const approvalManager = new ApprovalManager({
     store,
-    api: new HttpPermissionAPI(input.serverUrl, store, config.approvalTimeoutMs),
+    api: new SdkPermissionAPI(store, new OpenCodePermissionAdapter(input.client)),
     approvalTimeoutMs: config.approvalTimeoutMs,
     modelConfidenceThreshold: config.modelConfidenceThreshold,
     interpretModel: approvalModel
