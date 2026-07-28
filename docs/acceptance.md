@@ -26,7 +26,7 @@ REAL-00 至 REAL-18 的安全与恢复验收矩阵、受影响/全量执行档�
 
 发布前必须根据 [`docs/release-impact-1.0.5.md`](release-impact-1.0.5.md) 识别受影响场景；受影响场景全部真实重跑并取得脱敏微信截图后才能发布。用户可以选择按矩阵执行 REAL-00～REAL-18 全量真实回归；任一真实线程 `BLOCKED` 或 `UNVERIFIED` 都不能改写为通过。
 
-人工协作模式下，用户每条场景开始前必须确认目标会话和绑定身份；真实线程保留原始窗口标题和确认结果。标题含空格时可记录 `MANUAL_CONFIRMED`，但不能伪装为严格标题 `PASS`。主线程只接受包含版本、标题、确认、微信原文摘要、脱敏 requestID/decision、pending/outbox 前后、截图索引和清理结果的完整日志。
+人工协作模式下，用户每条场景开始前必须以真实线程文字确认目标会话和绑定身份；该确认不要求单独认证截图。真实线程仍须保留原始窗口标题和确认结果，且每个场景 `PASS` 必须有微信对话截图。标题含空格时可记录 `MANUAL_CONFIRMED`，但不能伪装为严格标题 `PASS`。主线程只接受包含版本、标题、确认、微信原文摘要、脱敏 requestID/decision、pending/outbox 前后、截图索引和清理结果的完整日志。
 
 可用 `npm run test:e2e:status` 做一轮无副作用状态扫描，或用 `npm run test:e2e:status -- --interval=30000` 周期扫描 OpenCode pending、本地 pending/outbox 和 context 年龄。扫描器不会读取微信屏幕，也不会自动把任何真实场景标记为通过；每轮仍需人工记录微信原文、脱敏 requestID/decision 和清理结果。
 
