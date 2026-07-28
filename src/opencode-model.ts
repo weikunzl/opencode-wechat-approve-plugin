@@ -3,12 +3,26 @@ import { validateModelIntent, type ApprovalIntent } from "./model-interpreter.js
 import { openCodeAuthorization, openCodeHeaders } from "./server-auth.js"
 
 interface ModelOptions {
-  serverURL: URL
+  serverURL?: URL
+  client?: ModelClient
   directory: string
   model: string
   fetcher?: typeof fetch
   authorization?: string | null
   onInternalSession?: (sessionID: string, active: boolean) => void
+}
+
+interface ModelClient {
+  session: {
+    create(options: unknown): Promise<unknown>
+    prompt(options: unknown): Promise<unknown>
+    delete(options: unknown): Promise<unknown>
+  }
+}
+
+enum ModelRoute {
+  Create = "/session",
+  Message = "/message",
 }
 
 export class OpenCodeApprovalModel {
@@ -94,6 +108,8 @@ export class OpenCodeApprovalModel {
     route: string,
     options: { method: "POST" | "DELETE"; body?: unknown },
   ): Promise<unknown> {
+    if (this.options.client) return this.requestWithClient(route, options)
+    if (!this.options.serverURL) throw new Error("缺少 OpenCode 模型 client")
     const url = new URL(route, this.options.serverURL)
     url.searchParams.set("directory", this.options.directory)
     const response = await this.fetcher(url, {
@@ -107,6 +123,26 @@ export class OpenCodeApprovalModel {
     })
     if (!response.ok) throw new Error(`OpenCode 模型请求失败: HTTP ${response.status}`)
     return response.json()
+  }
+
+  private async requestWithClient(
+    route: string,
+    options: { method: "POST" | "DELETE"; body?: unknown },
+  ): Promise<unknown> {
+    // SDK 覆盖会话生命周期时，直接使用注入 client，避免固定端口和自行鉴权。
+    const client = this.options.client!
+    if (route === ModelRoute.Create) return unwrap(await client.session.create({ query: { directory: this.options.directory }, body: options.body }))
+    const sessionID = this.sessionIDFromRoute(route, options.method === "DELETE")
+    if (options.method === "DELETE") return client.session.delete({ path: { id: sessionID }, query: { directory: this.options.directory } })
+    return unwrap(await client.session.prompt({ path: { id: sessionID }, query: { directory: this.options.directory }, body: options.body }))
+  }
+
+  private sessionIDFromRoute(route: string, deleting: boolean): string {
+    // 内部路由只允许本类生成的 /session/{id}/message 形式。
+    const suffix = deleting ? "(?:/message)?" : "/message"
+    const match = route.match(new RegExp(`^/session/([^/]+)${suffix}$`))
+    if (!match) throw new Error("模型会话路由无效")
+    return decodeURIComponent(match[1])
   }
 }
 
@@ -139,4 +175,10 @@ function record(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : null
+}
+
+function unwrap(value: unknown): unknown {
+  // SDK ResponseResult 的 data 才是接口正文，失败结构交给上层统一澄清。
+  const recordValue = record(value)
+  return recordValue && "data" in recordValue ? recordValue.data : value
 }

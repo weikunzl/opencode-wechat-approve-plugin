@@ -101,3 +101,27 @@ test("returns clarification and still deletes the internal session when the mode
   assert.equal(result.decision, "clarify")
   assert.equal(methods.at(-1), "DELETE")
 })
+
+test("uses the injected OpenCode client for model sessions", async () => {
+  const calls = []
+  const client = {
+    session: {
+      create: async (options) => { calls.push(["create", options]); return { data: { id: "ses-sdk" } } },
+      prompt: async (options) => {
+        calls.push(["prompt", options])
+        return { data: { info: { structured: { requestIDs: ["req-1"], decision: "once", confidence: 0.97, explanation: "ok" } } } }
+      },
+      delete: async (options) => { calls.push(["delete", options]); return { data: true } },
+    },
+  }
+  const model = new OpenCodeApprovalModel({
+    client,
+    directory: "/workspace/docs",
+    model: "opencode-go/qwen3.7-max",
+  })
+
+  const result = await model.interpret("允许", pending, 0.85)
+
+  assert.equal(result.decision, "once")
+  assert.deepEqual(calls.map(([kind]) => kind), ["create", "prompt", "delete"])
+})
