@@ -111,8 +111,6 @@ export function stageLocalPlugin(sourceRoot: string, configDirectory: string): s
 
 interface ConfigPatch {
   plugin: string
-  hostname: string
-  port: number
   agentNames?: string[]
 }
 
@@ -133,8 +131,6 @@ interface ApprovalPatchOptions {
 interface CorePatchOptions {
   source: string
   plugin: string
-  hostname: string
-  port: number
   formattingOptions: { insertSpaces: boolean; tabSize: number; eol: "\r\n" | "\n" }
 }
 
@@ -148,8 +144,6 @@ interface InstallOptions {
   sendTest(): Promise<boolean>
   pluginName?: string
   commitPlugin?(): PluginCommit
-  hostname?: string
-  port?: number
   agentNames?: string[]
 }
 
@@ -290,8 +284,6 @@ export async function install(options: InstallOptions): Promise<void> {
   const source = fs.existsSync(options.configFile) ? fs.readFileSync(options.configFile, "utf8") : "{}\n"
   const updated = patchOpenCodeConfig(source, {
     plugin: options.pluginName ?? PACKAGE_NAME,
-    hostname: options.hostname ?? "127.0.0.1",
-    port: options.port ?? 4096,
     agentNames: options.agentNames,
   })
 
@@ -323,10 +315,6 @@ export async function install(options: InstallOptions): Promise<void> {
     options.store.savePluginConfig(
       loadPluginConfig({
         model,
-        server: {
-          hostname: options.hostname ?? "127.0.0.1",
-          port: options.port ?? 4096,
-        },
       }),
     )
     pluginCommit?.finalize()
