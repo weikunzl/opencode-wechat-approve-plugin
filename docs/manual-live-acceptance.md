@@ -6,7 +6,7 @@
 
 ## 门禁与执行顺序
 
-1. 主流程先使用待验收 registry 包创建 REAL-00 无副作用通知。
+1. 主流程先记录待验收构建物来源（`local-dist`、tarball 或 registry），再创建 REAL-00 无副作用通知。
 2. 用户在真实线程中明确文字确认目标会话、绑定身份和有效 context；人工模式以对应时间点的结构化文字证据为准，不要求截图。
 3. 用户在每个 REAL-00～REAL-18 开始前再次确认目标会话和绑定身份；真实线程记录原始窗口标题，即使标题是“微信 ClawBot”。
 4. REAL-00 通过门禁后，严格按 REAL-01、REAL-02…REAL-18 串行执行；每条完成后清理 pending，未清理不得进入下一条。
@@ -22,7 +22,8 @@
 | 字段 | 要求 |
 | --- | --- |
 | `scenarioID` | `REAL-00` 至 `REAL-18` 的精确值 |
-| `packageVersion` | 实际 registry 包版本，不能用本地 `dist` 代替 |
+| `packageVersion` | 实际构建物版本；必须与 `provenance` 一并记录 |
+| `provenance` | `local-dist`、tarball 或 registry；三者不得互相替代 |
 | `originalWindowTitle` | 屏幕观察到的原始标题，不做覆盖或静默修正 |
 | `manualConfirmation` | 固定为 `MANUAL_CONFIRMED`，表示用户已确认目标会话和绑定身份 |
 | `evidenceMode` | 严格屏幕证据为 `SCREEN`；人工文字证据为 `MANUAL_REPORTED` |

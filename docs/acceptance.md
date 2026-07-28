@@ -6,7 +6,7 @@
 
 新增自动化证据包括：事件版本归一化、共享状态 0600/损坏隔离/V1 迁移、实例注册、邮箱幂等、创建时间排序的并发 claim、Leader ingress、owner command worker、失败重试、次实例事件转发和 SDK 权限回写。旧 HTTP/内存测试仍只证明兼容协议，不代表真实微信证据。
 
-本次架构变更属于破坏性运行方式变更。发布前必须用待发布 registry 包在两个独立 OpenCode 进程中重跑受影响的 REAL-00～REAL-18；未完成真实微信文字证据的项目保持 UNVERIFIED，不得以现有 1.0.x 记录替代。
+本次架构变更属于破坏性运行方式变更。发布前先用待发布 `local-dist` 或 tarball 在独立 OpenCode 进程中重跑受影响 REAL-00～REAL-18；发布后再以 registry 包复核安装来源。未完成真实微信文字证据的项目保持 UNVERIFIED，不得以现有 1.0.x 记录替代。
 
 ## Automated matrix
 
@@ -30,13 +30,13 @@
 
 REAL-00 至 REAL-18 的安全与恢复验收矩阵、受影响/全量执行档位和文字证据索引格式见 [`docs/approval-security-matrix.md`](approval-security-matrix.md)；用户手工发送时遵循 [`docs/manual-live-acceptance.md`](manual-live-acceptance.md)。真实 live 仍必须逐项观察微信原文，不能用 fake model、HTTP 或内存结果替代。
 
-此前 1.0.x 的人工文字记录仅作为历史参考，不覆盖本次 1.1.0 原生插件迁移。严格屏幕证据使用 `evidenceMode=SCREEN`；人工模式使用结构化文字证据，不要求截图。REAL-00～REAL-18 必须使用 1.1.0 registry 包重新验收，未完成的项目保持 `UNVERIFIED`。
+此前 1.0.x 的人工文字记录仅作为历史参考，不覆盖本次 1.1.0 原生插件迁移。严格屏幕证据使用 `evidenceMode=SCREEN`；人工模式使用结构化文字证据，不要求截图。每项必须记录 `local-dist`、tarball 或 registry 来源；发布前不得把本地证据写成 registry 证据，发布后不得以本地证据替代 registry 安装复核。
 
 发布前必须根据 [`docs/release-impact-1.1.0.md`](release-impact-1.1.0.md) 识别受影响场景；严格标题场景需 `PASS + SCREEN`，人工场景需符合预期的完整结构化文字证据并标记 `PASS + MANUAL_REPORTED`。用户可以选择按矩阵执行 REAL-00～REAL-18 全量真实回归；任一真实线程 `BLOCKED` 或 `UNVERIFIED` 都不能改写为通过。
 
 人工协作模式下，用户每条场景开始前必须以真实线程文字确认目标会话和绑定身份；真实线程须保留原始窗口标题、用户确认、微信原文、脱敏决策、pending/outbox、清理结果和操作者时间。`MANUAL_CONFIRMED` 仅表示身份确认；字段完整且符合预期时标记 `PASS + MANUAL_REPORTED`。主线程只接受完整结构化文字日志。
 
-可用 `npm run test:e2e:status` 做一轮无副作用状态扫描，或用 `npm run test:e2e:status -- --interval=30000` 周期扫描 OpenCode pending、本地 pending/outbox 和 context 年龄。扫描器不会读取微信屏幕，也不会自动把任何真实场景标记为通过；每轮仍需人工记录微信原文、脱敏 requestID/decision 和清理结果。
+可用 `npm run test:e2e:status` 做一轮无副作用状态扫描，或用 `npm run test:e2e:status -- --interval=30000` 周期扫描。输出包含来源、观察时间、服务端与本地的脱敏 request ID、pending/outbox 前后快照；扫描器不会读取微信屏幕，也不会自动把任何真实场景标记为通过。
 
 CI runs the same suite on Windows, macOS and Linux with Node.js 20.
 

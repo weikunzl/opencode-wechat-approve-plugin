@@ -5,6 +5,7 @@ import { IlinkClientTransport } from "./client.js"
 import type { NotificationEnvelope } from "./domain.js"
 import { InternalSessionRegistry } from "./internal-session-registry.js"
 import { OpenCodePermissionAdapter } from "./opencode-adapter.js"
+import { HttpPermissionAPI } from "./opencode-permissions.js"
 import { SdkPermissionAPI } from "./sdk-permissions.js"
 import { OpenCodeApprovalModel } from "./opencode-model.js"
 import { normalizeOpenCodeEvent } from "./event-normalizer.js"
@@ -302,9 +303,13 @@ export const WeChatPlugin: Plugin = async (input) => {
         onInternalSession: (sessionID, active) => internalSessions.update(sessionID, active),
       })
     : null
+  const permissions = new OpenCodePermissionAdapter(
+    input.client,
+    new HttpPermissionAPI(input.serverUrl, store, config.approvalTimeoutMs),
+  )
   const approvalManager = new ApprovalManager({
     store,
-    api: new SdkPermissionAPI(store, new OpenCodePermissionAdapter(input.client)),
+    api: new SdkPermissionAPI(store, permissions),
     approvalTimeoutMs: config.approvalTimeoutMs,
     modelConfidenceThreshold: config.modelConfidenceThreshold,
     interpretModel: approvalModel

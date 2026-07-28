@@ -6,12 +6,12 @@ import { WeChatStore } from "./store.js"
 export class SdkPermissionAPI implements PermissionAPI {
   constructor(
     private readonly store: WeChatStore,
-    private readonly adapter: Pick<OpenCodePermissionAdapter, "reply">,
+    private readonly adapter: Pick<OpenCodePermissionAdapter, "list" | "reply">,
   ) {}
 
   async list(): Promise<PendingApproval[]> {
-    // 原生插件从共享 pending 索引读取，审批事件负责保持索引最新。
-    return this.store.loadPendingApprovals()
+    // 读取 OpenCode 权威快照，避免重启后把遗留共享索引当作待审批请求。
+    return this.adapter.list()
   }
 
   async reply(requestID: string, decision: "once" | "always" | "reject"): Promise<boolean> {

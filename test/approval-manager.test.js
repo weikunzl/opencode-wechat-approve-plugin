@@ -265,6 +265,17 @@ test("removes a request answered natively in OpenCode", async () => {
   assert.deepEqual(store.loadPendingApprovals(), [])
 })
 
+test("keeps local approvals when authoritative reconciliation fails", async () => {
+  const { manager, store, api, replies } = harness([request("r1", 1)])
+  api.list = async () => { throw new Error("authority unavailable") }
+
+  const notices = await manager.reconcile()
+
+  assert.deepEqual(store.loadPendingApprovals().map((item) => item.requestID), ["r1"])
+  assert.deepEqual(replies, [])
+  assert.match(notices[0].text, /Approval sync unavailable/)
+})
+
 test("ignores ordinary text when no approval is pending", async () => {
   const { manager, replies } = harness([])
 

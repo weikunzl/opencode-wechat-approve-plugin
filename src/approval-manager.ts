@@ -55,7 +55,8 @@ export class ApprovalManager {
 
   async reconcile(isActive: () => boolean = alwaysActive): Promise<NotificationEnvelope[]> {
     const before = this.store.loadPendingApprovals()
-    const current = await this.api.list()
+    const current = await this.listForReconcile()
+    if (current === null) return [this.syncUnavailableNotice()]
     if (!isActive()) return []
     this.store.savePendingApprovals(current)
 
@@ -329,6 +330,25 @@ export class ApprovalManager {
     }
     this.store.enqueueNotification(notification)
     return notification
+  }
+
+  private async listForReconcile(): Promise<PendingApproval[] | null> {
+    // 权威快照读取失败时保留现有索引，避免网络异常触发错误拒绝或清空。
+    try {
+      return await this.api.list()
+    } catch {
+      return null
+    }
+  }
+
+  private syncUnavailableNotice(): NotificationEnvelope {
+    // 错误提示不包含服务端原文，防止诊断信息意外泄露凭据或请求正文。
+    return this.notice(
+      `approval-sync-unavailable:${this.now()}`,
+      "warning",
+      "warning",
+      "[Approval sync unavailable]\n无法同步 OpenCode 待审批请求，已保留现有审批状态。",
+    )
   }
 }
 

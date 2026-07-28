@@ -1,10 +1,14 @@
 import process from "node:process"
 
+import { ProvenanceKind, createProvenance, createStatusSnapshot } from "../dist/live-evidence.js"
 import { WeChatStore } from "../dist/store.js"
 
 const SCENARIO_IDS = Array.from({ length: 19 }, (_, index) => `REAL-${String(index).padStart(2, "0")}`)
 const DEFAULT_SERVER_URL = "http://127.0.0.1:4096"
 const MIN_INTERVAL_MS = 1_000
+const DEFAULT_PROVENANCE = ProvenanceKind.LocalDist
+const DEFAULT_VERSION = "unknown"
+const DEFAULT_ENTRYPOINT = "local-dist"
 
 function parseInterval(argv) {
   // 默认只扫描一轮，显式 interval 才保持周期运行。
@@ -21,9 +25,10 @@ function readLocalState() {
   // 只输出计数和上下文年龄，严禁读取或打印 token、游标和用户标识。
   const store = new WeChatStore()
   const context = store.loadContext()
+  const pending = store.loadPendingApprovals()
   const state = {
-    pending: store.loadPendingApprovals().length,
-    outbox: store.loadOutbox().length,
+    pending,
+    outboxCount: store.loadOutbox().length,
     context: context ? "bound" : "unavailable",
     contextAgeMs: context ? Math.max(0, Date.now() - context.updatedAt) : null,
   }
@@ -37,20 +42,43 @@ async function readServerState() {
     const response = await fetch(new URL("/permission", url), {
       signal: AbortSignal.timeout(3_000),
     })
-    if (!response.ok) return { status: `http-${response.status}`, pending: null }
+    if (!response.ok) return { status: `http-${response.status}`, pending: null, requestIDs: [] }
     const value = await response.json()
-    return { status: "ok", pending: Array.isArray(value) ? value.length : null }
+    const pending = Array.isArray(value) ? value : []
+    return { status: "ok", pending: Array.isArray(value) ? pending.length : null, requestIDs: readRequestIDs(pending) }
   } catch (error) {
-    return { status: error instanceof Error ? error.name : "unavailable", pending: null }
+    return { status: error instanceof Error ? error.name : "unavailable", pending: null, requestIDs: [] }
   }
+}
+
+function readRequestIDs(pending) {
+  // 仅从权威响应读取 request ID，后续由快照模块统一脱敏。
+  return pending.map((item) => item?.id ?? item?.requestID).filter((item) => typeof item === "string")
+}
+
+function readProvenance() {
+  // 显式来源防止本地构建、tarball 与 registry 验收相互替代。
+  const kind = process.env.E2E_PROVENANCE_KIND ?? DEFAULT_PROVENANCE
+  if (!Object.values(ProvenanceKind).includes(kind)) throw new Error("E2E_PROVENANCE_KIND 无效")
+  return createProvenance({
+    kind,
+    packageVersion: process.env.E2E_PACKAGE_VERSION ?? DEFAULT_VERSION,
+    entrypoint: process.env.E2E_ENTRYPOINT ?? DEFAULT_ENTRYPOINT,
+  })
 }
 
 function printSnapshot(local, server) {
   // 微信屏幕无法由该无副作用扫描器读取，必须人工核对原文后才能标记 live 通过。
-  const timestamp = new Date().toISOString()
-  process.stdout.write(`状态扫描 ${timestamp}\n`)
+  const snapshot = createStatusSnapshot({
+    observedAt: new Date().toISOString(),
+    provenance: readProvenance(),
+    localPending: local.pending,
+    serverPending: server.requestIDs,
+    outboxCount: local.outboxCount,
+  })
+  process.stdout.write(`状态扫描 ${JSON.stringify(snapshot)}\n`)
   process.stdout.write(`OpenCode: ${server.status}, pending=${server.pending ?? "?"}\n`)
-  process.stdout.write(`本地: pending=${local.pending}, outbox=${local.outbox}, context=${local.context}, contextAgeMs=${local.contextAgeMs ?? "?"}\n`)
+  process.stdout.write(`本地: context=${local.context}, contextAgeMs=${local.contextAgeMs ?? "?"}\n`)
   process.stdout.write("微信ClawBot: 需要人工确认可见标题、原文、requestID/decision；未观察不得通过\n")
   for (const scenario of SCENARIO_IDS) process.stdout.write(`${scenario}: UNVERIFIED\n`)
 }

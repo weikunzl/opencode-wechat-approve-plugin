@@ -47,11 +47,20 @@
 | REAL-00 | PASS | `MANUAL_REPORTED` | `1.0.5` | `微信 ClawBot` | `是` | `已确认目标会话和绑定身份` | `[Done] REAL-00 retry-00 registry smoke ...` | `无审批请求` | `0→0` | `0→0` | `无 pending/outbox（只读快照）` | `2026-07-28T05:14:33.899Z` |
 | REAL-01 | PASS | `MANUAL_REPORTED` | `1.0.5` | `微信 ClawBot` | `是` | `沿用已确认的目标会话和绑定身份` | `[Done] REAL-01 manual approval` | `无审批请求` | `0→0` | `0→0` | `任务完成；无 pending/outbox` | `2026-07-28T05:29:14.841Z` |
 
+## 本地 1.1.0 发布前验收状态
+
+| 场景 ID | 状态 | evidenceMode | 证据说明 |
+| --- | --- | --- | --- |
+| REAL-00 | PASS | `MANUAL_REPORTED` | 已确认会话 `微信ClawBot`；微信可见 `🎉 [Done] REAL-00 local 1.1.0 smoke`。 |
+| REAL-01 | PASS | `MANUAL_REPORTED` | 已确认同一目标会话；`[Approval #1] unknown`（脱敏 session）、`bash` / `printf REAL-01-PENDING`；用户依次发送“这个操作可以吗？”和“拒绝”，微信可见澄清、`[Approval result] #1: 已拒绝` 与 Done；完成时间 `2026-07-28T12:50:05.957Z`；已核验 pending `1→0`、outbox `0→0`。 |
+| REAL-02 | IN_PROGRESS | `MANUAL_REPORTED`（恢复修复已验证） | 主目录 4096 本地 `dist` 实例已重启；启动时权威 OpenCode `/permission` 与本地审批索引均为 `0`，outbox 为 `0`，已清除已停止 4196 的遗留 pending。当前已重建 `RECONCILED-A/B` 两个 ask pending，权威与本地均为 `2`；待两条提示确认可见后发送一次模糊语句。 |
+| REAL-03～REAL-18 | NOT_STARTED | — | 必须按本地 `1.1.0` 串行获取真实微信/OpenCode 文字证据。 |
+
 严格标题 `PASS` 需要 `evidenceMode=SCREEN`；人工 `PASS` 需要 `evidenceMode=MANUAL_REPORTED` 和完整文字字段。`MANUAL_CONFIRMED` 仅表示身份确认，`BLOCKED`、`UNVERIFIED` 和缺字段项不得标记通过或进入发布。
 
 ## 证据与清理
 
-每项结束后必须用明确“第 N 个拒绝”或“拒绝”清空 pending；清理失败即停止并标记 `BLOCKED`。`npm run test:e2e:status` 默认做一轮无副作用扫描，`npm run test:e2e:status -- --interval=30000` 才会周期运行；它只输出 pending/outbox/context 年龄，微信标题和原文仍需人工观察，不会把状态标为通过。
+每项结束后必须用明确“第 N 个拒绝”或“拒绝”清空 pending；清理失败即停止并标记 `BLOCKED`。`npm run test:e2e:status` 默认做一轮无副作用扫描，`npm run test:e2e:status -- --interval=30000` 才会周期运行；它输出来源、脱敏 request ID、pending/outbox 与观察时间，微信标题和原文仍需人工观察，不会把状态标为通过。
 
 历史 REAL-00 和 REAL-01 的 `1.0.5` 文字证据不覆盖本版本；REAL-00 至 REAL-18 必须在 registry `1.1.0` 安装、重启或新建会话后重新验证 `permission.updated`、pending 和跨进程路由。旧 QR 绑定进程已停止，避免竞争 context。
 

@@ -7,7 +7,7 @@ import test from "node:test"
 import { SdkPermissionAPI } from "../dist/sdk-permissions.js"
 import { WeChatStore } from "../dist/store.js"
 
-test("lists stored pending approvals and replies through the SDK adapter", async () => {
+test("lists authoritative pending approvals instead of stale local state", async () => {
   const store = new WeChatStore(mkdtempSync(join(tmpdir(), "wechat-sdk-permission-")))
   const pending = {
     requestID: "req-1",
@@ -22,17 +22,18 @@ test("lists stored pending approvals and replies through the SDK adapter", async
   store.savePendingApprovals([pending])
   const calls = []
   const api = new SdkPermissionAPI(store, {
+    list: async () => [],
     reply: async (input) => { calls.push(input); return true },
   })
 
-  assert.deepEqual(await api.list(), [pending])
+  assert.deepEqual(await api.list(), [])
   assert.equal(await api.reply("req-1", "always"), true)
   assert.deepEqual(calls, [{ sessionID: "ses-1", requestID: "req-1", decision: "always" }])
 })
 
 test("rejects a reply for an unknown pending request", async () => {
   const store = new WeChatStore(mkdtempSync(join(tmpdir(), "wechat-sdk-permission-missing-")))
-  const api = new SdkPermissionAPI(store, { reply: async () => true })
+  const api = new SdkPermissionAPI(store, { list: async () => [], reply: async () => true })
 
   assert.equal(await api.reply("unknown", "reject"), false)
 })
