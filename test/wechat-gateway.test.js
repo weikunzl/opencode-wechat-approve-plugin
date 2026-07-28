@@ -96,6 +96,26 @@ test("persists cursor before dispatching received messages", async () => {
   assert.deepEqual(order, ["cursor-before-message"])
 })
 
+test("persists inbox before cursor when an ingress recorder is configured", async () => {
+  const { batches, gateway, store } = harness()
+  const order = []
+  gateway.setInboundRecorder(async () => {
+    order.push(`inbox:${store.loadCursor()}`)
+  })
+  batches.push({
+    ret: 0,
+    get_updates_buf: "cursor-after-inbox",
+    msgs: [privateText({ senderID: "owner@im.wechat", text: "好的", id: "m5" })],
+  })
+
+  await gateway.pollOnce(async () => {
+    order.push(`handler:${store.loadCursor()}`)
+  })
+
+  assert.deepEqual(order, ["inbox:", "handler:"])
+  assert.equal(store.loadCursor(), "cursor-after-inbox")
+})
+
 test("persists outbound notification until delivery succeeds", async () => {
   const { gateway, store, sent } = harness()
   const notification = {

@@ -25,6 +25,7 @@ export class WeChatGateway {
   private pollLoopPromise: Promise<void> | null = null
   private retryContextGeneration: string | null = null
   private seen: Set<string>
+  private inboundRecorder: ((message: InboundApprovalMessage) => Promise<void>) | null = null
 
   constructor(
     private readonly store: WeChatStore,
@@ -86,6 +87,11 @@ export class WeChatGateway {
     this.pollLoopPromise = this.pollLoop(onMessage, this.pollController.signal)
   }
 
+  setInboundRecorder(recorder: (message: InboundApprovalMessage) => Promise<void>): void {
+    // Leader 模式先持久化入站摘要，再推进外部 cursor，避免崩溃丢消息。
+    this.inboundRecorder = recorder
+  }
+
   async stop(): Promise<void> {
     this.running = false
     this.pollController?.abort()
@@ -115,8 +121,9 @@ export class WeChatGateway {
       throw new Error(`微信轮询失败: ${response.errmsg || response.ret}`)
     }
 
-    if (typeof response.get_updates_buf === "string") {
-      this.store.saveCursor(response.get_updates_buf)
+    const nextCursor = response.get_updates_buf
+    if (typeof nextCursor === "string" && !this.inboundRecorder) {
+      this.store.saveCursor(nextCursor)
     }
 
     const account = this.store.loadAccount()
@@ -144,8 +151,10 @@ export class WeChatGateway {
       }
 
       if (signal?.aborted) return
+      if (this.inboundRecorder) await this.inboundRecorder(parsed.message)
       await onMessage(parsed.message)
     }
+    if (typeof nextCursor === "string" && this.inboundRecorder) this.store.saveCursor(nextCursor)
     if (!signal?.aborted && !binding && this.store.loadOutbox().length > 0 && this.canFlushOutbox()) {
       await this.flushOutbox()
     }
