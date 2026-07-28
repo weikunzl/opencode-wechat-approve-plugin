@@ -9,7 +9,7 @@
 | ID | 前置条件 | 操作 | 可观察预期 | 自动化证据 | 真实状态 / 文字证据 |
 | --- | --- | --- | --- | --- | --- |
 | REAL-00 | registry 1.0.5、绑定、doctor | 发送无副作用诊断通知 | 微信可见原文，context 有效，outbox 可清空 | 网关/CLI 测试 | `PASS`；`evidenceMode=MANUAL_REPORTED`，原始标题为“微信 ClawBot” |
-| REAL-01 | 单 pending | “这个操作可以吗？” | 澄清；decision 空；pending `1→1` | `semantic-approval.test.js` | `UNVERIFIED`；OpenCode v1.18.7 agent 级 `*/*=allow` 覆盖项目 `bash=ask`，未形成 `permission.asked`/pending=1，且缺微信澄清原文及 pending/outbox 前后 |
+| REAL-01 | registry 1.0.5、已绑定、可执行会话 | 执行无副作用任务 | 微信仅出现一次 Done，任务完成 | `session-notifier.test.js` | `PASS`；`evidenceMode=MANUAL_REPORTED`，已观察 `[Done] REAL-01 manual approval` |
 | REAL-02 | 多 pending | “那个先做一下” | 澄清目标；pending `2→2` | `semantic-approval.test.js` | `UNVERIFIED`；文字证据待真实线程 |
 | REAL-03 | 单 pending | “不要放行这个操作” | 仅 reject，不得 once/always | `approval-manager.test.js` | `UNVERIFIED`；文字证据待真实线程 |
 | REAL-04 | 多 pending | “不要放行” | 不批量拒绝，继续澄清 | `semantic-approval.test.js` | `UNVERIFIED`；文字证据待真实线程 |
@@ -45,6 +45,7 @@
 | 场景 ID | 状态 | evidenceMode | registry 版本 | 原始窗口标题 | MANUAL_CONFIRMED | 用户确认 | 微信可见原文 | requestID=decision | pending 前→后 | outbox 前→后 | 清理结果 | 操作者时间 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | REAL-00 | PASS | `MANUAL_REPORTED` | `1.0.5` | `微信 ClawBot` | `是` | `已确认目标会话和绑定身份` | `[Done] REAL-00 retry-00 registry smoke ...` | `无审批请求` | `0→0` | `0→0` | `无 pending/outbox（只读快照）` | `2026-07-28T05:14:33.899Z` |
+| REAL-01 | PASS | `MANUAL_REPORTED` | `1.0.5` | `微信 ClawBot` | `是` | `沿用已确认的目标会话和绑定身份` | `[Done] REAL-01 manual approval` | `无审批请求` | `0→0` | `0→0` | `任务完成；无 pending/outbox` | `2026-07-28T05:29:14.841Z` |
 
 严格标题 `PASS` 需要 `evidenceMode=SCREEN`；人工 `PASS` 需要 `evidenceMode=MANUAL_REPORTED` 和完整文字字段。`MANUAL_CONFIRMED` 仅表示身份确认，`BLOCKED`、`UNVERIFIED` 和缺字段项不得标记通过或进入发布。
 
@@ -52,7 +53,6 @@
 
 每项结束后必须用明确“第 N 个拒绝”或“拒绝”清空 pending；清理失败即停止并标记 `BLOCKED`。`npm run test:e2e:status` 默认做一轮无副作用扫描，`npm run test:e2e:status -- --interval=30000` 才会周期运行；它只输出 pending/outbox/context 年龄，微信标题和原文仍需人工观察，不会把状态标为通过。
 
-当前实现已修复多目录租约事件转发，且 registry 1.0.5 `dist/index.js` 已包含修复。REAL-00 已消费 retry-00 的完整文字证据并标记 `status=PASS`、`evidenceMode=MANUAL_REPORTED`；这不是屏幕证据。REAL-01 仅收到 Done 文本，缺少微信澄清原文及 pending/outbox 前后，保持 `UNVERIFIED`，不得推进 REAL-02。旧 QR 绑定进程已停止，避免竞争 context。
-当前实现已修复多目录租约事件转发，且 registry 1.0.5 `dist/index.js` 已包含修复。REAL-00 已消费 retry-00 的完整文字证据并标记 `status=PASS`、`evidenceMode=MANUAL_REPORTED`；这不是屏幕证据。REAL-01 仅收到 Done 文本，缺少微信澄清原文及 pending/outbox 前后，且 active agent 的 `bash/*=allow` 阻止形成 `permission.asked`/pending=1，保持 `UNVERIFIED`，不得推进 REAL-02。解除条件是 active agent 最终匹配为 `bash=ask`，重载会话后观察到 `permission.asked` 和 pending=1。旧 QR 绑定进程已停止，避免竞争 context。
+当前实现已修复多目录租约事件转发，且 registry 1.0.5 `dist/index.js` 已包含修复。REAL-00 和 REAL-01 已分别消费 retry-00 与任务完成的完整文字证据，均标记 `status=PASS`、`evidenceMode=MANUAL_REPORTED`；两者都不是屏幕证据。OpenCode 的 `bash/*=allow` 仍会阻止 REAL-02 至 REAL-14 等审批语义场景形成 `permission.asked`/pending=1；这些场景在 active agent 最终匹配为 `bash=ask` 并重载会话后才能继续。旧 QR 绑定进程已停止，避免竞争 context。
 
 主线程按 [`docs/manual-live-acceptance.md`](manual-live-acceptance.md) 扫描真实线程日志；任何缺字段或 `BLOCKED`/`UNVERIFIED` 记录都不得转成通过。

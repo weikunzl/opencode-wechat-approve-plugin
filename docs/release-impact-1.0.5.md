@@ -26,8 +26,7 @@
 
 用户人工身份确认以真实线程中的明确文字为证据；人工场景必须提供完整结构化文字字段，不要求截图。严格标题结果标记 `PASS + SCREEN`，人工结果标记 `PASS + MANUAL_REPORTED`；文字证据不得冒充屏幕证据。`MANUAL_CONFIRMED` 仅表示身份确认，不能单独通过。任一真实场景为 `BLOCKED`/`UNVERIFIED` 或缺少字段时，发布状态必须保持阻塞。
 
-当前 REAL-00 已标记 `status=PASS`、`evidenceMode=MANUAL_REPORTED`，使用 retry-00 的完整文字字段；该结果不是屏幕证据。REAL-01 目前 `UNVERIFIED`，缺少微信澄清原文及 pending/outbox 前后，不能进入 REAL-02。
-REAL-01 另有外部阻塞：OpenCode v1.18.7 agent 级 `*/*=allow` 追加于项目 `bash=ask` 后，evaluate 采用最后匹配，通配 allow 覆盖 ask，导致真实 `permission.asked/pending=1` 前置条件未建立。解除条件是 active agent 最终匹配 `bash=ask`，重载会话后验证 `permission.asked` 与 pending=`1`，再补齐统一证据字段。
+当前 REAL-00 与 REAL-01 均已标记 `status=PASS`、`evidenceMode=MANUAL_REPORTED`：前者使用 retry-00 的诊断文字，后者按用户重定义的“任务执行完成即可”标准使用 `[Done] REAL-01 manual approval`。两者都不是屏幕证据。OpenCode v1.18.7 agent 级 `*/*=allow` 仍覆盖项目 `bash=ask`，因此 REAL-02 至 REAL-14 的审批语义场景尚未建立 `permission.asked/pending=1` 前置条件；解除条件是 active agent 最终匹配 `bash=ask`，重载会话后验证该前置条件。
 
 ## 安全与回滚边界
 

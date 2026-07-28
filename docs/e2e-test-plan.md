@@ -111,9 +111,9 @@ registry npx：通过/未发布/失败原因
 
 早期绑定上下文曾返回 `ret/errcode=-14`，导致一次 `prepare failed`；按诊断流程 force bind、重新扫码并刷新 context 后，registry 1.0.2 审批通知已恢复。该历史失败仍作为恢复风险记录，不能把它与后续成功消息混为同一证据。
 
-本轮 registry 1.0.5 诊断记录：doctor 四项均为 OK，发布 `dist/index.js` 已包含租约持有者事件转发；服务已重启并使用全局 registry spec。REAL-00 屏幕显示为“微信 ClawBot”（含空格），不符合严格标题“微信ClawBot”，因此未发送诊断消息，REAL-00 标记 `BLOCKED`，其余 REAL 场景标记 `UNVERIFIED`。
+本轮 registry 1.0.5 诊断记录：doctor 四项均为 OK，发布 `dist/index.js` 已包含租约持有者事件转发；服务已重启并使用全局 registry spec。REAL-00 使用完整人工文字证据标记 `PASS + MANUAL_REPORTED`。用户将 REAL-01 重定义为“任务执行完成即可”，已使用 `[Done] REAL-01 manual approval` 标记 `PASS + MANUAL_REPORTED`；两者均不是严格屏幕证据。
 
-REAL-01 当前另有外部阻塞，保持 `UNVERIFIED`：OpenCode v1.18.7 的 agent 级 `*/*=allow` 追加在项目 `bash=ask` 后，evaluate 采用最后匹配，导致通配 allow 覆盖 ask。解除条件是 active agent 最终匹配 `bash=ask`，重载会话后验证 `permission.asked` 且 pending=`1`；在此之前不得标记通过。
+OpenCode v1.18.7 的 agent 级 `*/*=allow` 仍覆盖项目 `bash=ask`，使 REAL-02 至 REAL-14 的审批语义场景无法形成 `permission.asked`/pending=1。解除条件是 active agent 最终匹配 `bash=ask`，重载会话后验证该前置条件；在此之前不得标记这些审批场景通过。
 
 ### `prepare failed` 处理记录
 
