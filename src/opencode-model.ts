@@ -1,14 +1,10 @@
 import type { PendingApproval } from "./domain.js"
 import { validateModelIntent, type ApprovalIntent } from "./model-interpreter.js"
-import { openCodeAuthorization, openCodeHeaders } from "./server-auth.js"
 
 interface ModelOptions {
-  serverURL?: URL
-  client?: ModelClient
+  client: ModelClient
   directory: string
   model: string
-  fetcher?: typeof fetch
-  authorization?: string | null
   onInternalSession?: (sessionID: string, active: boolean) => void
 }
 
@@ -26,13 +22,7 @@ enum ModelRoute {
 }
 
 export class OpenCodeApprovalModel {
-  private readonly fetcher: typeof fetch
-  private readonly authorization: string | null
-
-  constructor(private readonly options: ModelOptions) {
-    this.fetcher = options.fetcher ?? fetch
-    this.authorization = options.authorization ?? openCodeAuthorization()
-  }
+  constructor(private readonly options: ModelOptions) {}
 
   async interpret(
     text: string,
@@ -108,21 +98,8 @@ export class OpenCodeApprovalModel {
     route: string,
     options: { method: "POST" | "DELETE"; body?: unknown },
   ): Promise<unknown> {
-    if (this.options.client) return this.requestWithClient(route, options)
-    if (!this.options.serverURL) throw new Error("缺少 OpenCode 模型 client")
-    const url = new URL(route, this.options.serverURL)
-    url.searchParams.set("directory", this.options.directory)
-    const response = await this.fetcher(url, {
-      method: options.method,
-      headers: openCodeHeaders(
-        options.body === undefined ? undefined : { "content-type": "application/json" },
-        this.authorization,
-      ),
-      body: options.body === undefined ? undefined : JSON.stringify(options.body),
-      signal: AbortSignal.timeout(30_000),
-    })
-    if (!response.ok) throw new Error(`OpenCode 模型请求失败: HTTP ${response.status}`)
-    return response.json()
+    // 模型会话始终通过官方注入 client，避免插件自行管理 server 鉴权。
+    return this.requestWithClient(route, options)
   }
 
   private async requestWithClient(
@@ -130,7 +107,7 @@ export class OpenCodeApprovalModel {
     options: { method: "POST" | "DELETE"; body?: unknown },
   ): Promise<unknown> {
     // SDK 覆盖会话生命周期时，直接使用注入 client，避免固定端口和自行鉴权。
-    const client = this.options.client!
+    const client = this.options.client
     if (route === ModelRoute.Create) return unwrap(await client.session.create({ query: { directory: this.options.directory }, body: options.body }))
     const sessionID = this.sessionIDFromRoute(route, options.method === "DELETE")
     if (options.method === "DELETE") return client.session.delete({ path: { id: sessionID }, query: { directory: this.options.directory } })

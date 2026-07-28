@@ -306,7 +306,6 @@ export const WeChatPlugin: Plugin = async (input) => {
   const approvalModel = config.model
     ? new OpenCodeApprovalModel({
         client: input.client,
-        serverURL: input.serverUrl,
         directory: input.directory,
         model: config.model,
         onInternalSession: (sessionID, active) => internalSessions.update(sessionID, active),
