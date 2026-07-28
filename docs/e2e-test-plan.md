@@ -23,6 +23,10 @@ npx 命令在隔离临时目录执行，避免仓库同名包上下文干扰 CLI
 E2E_NPM_SPEC=@wekux/opencode-wechat-approve-plugin npm run test:e2e
 ```
 
+安装验收还应检查全局 OpenCode `plugin` 数组包含带版本的 registry 规格
+（如 `@wekux/opencode-wechat-approve-plugin@1.0.2`），不应回退到本地
+`file://` 托管路径。
+
 默认 smoke 不触发扫码、不写入真实绑定或微信状态。需要真实验收时，必须显式运行：
 
 ```bash

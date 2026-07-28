@@ -5,7 +5,12 @@ import { join } from "node:path"
 import test from "node:test"
 import { fileURLToPath } from "node:url"
 
-import { install, patchOpenCodeConfig, stageLocalPlugin } from "../dist/install.js"
+import {
+  install,
+  patchOpenCodeConfig,
+  registryPluginSpec,
+  stageLocalPlugin,
+} from "../dist/install.js"
 import { WeChatStore } from "../dist/store.js"
 
 test("preserves JSONC comments and unrelated settings while installing idempotently", () => {
@@ -31,6 +36,16 @@ test("preserves JSONC comments and unrelated settings while installing idempoten
   assert.match(twice, /"formatter": \{ "prettier": \{\} \}/)
   assert.equal((twice.match(/opencode-wechat-approve-plugin/g) ?? []).length, 1)
   assert.match(twice, /"port": 4096/)
+})
+
+test("derives the registry plugin spec from the published package version", () => {
+  const root = mkdtempSync(join(tmpdir(), "wechat-plugin-spec-"))
+  writeFileSync(join(root, "package.json"), '{"version":"1.0.3"}\n')
+
+  assert.equal(
+    registryPluginSpec(root),
+    "@wekux/opencode-wechat-approve-plugin@1.0.3",
+  )
 })
 
 test("replaces every previously managed plugin alias with one entry", () => {
@@ -68,6 +83,7 @@ test("persists the confirmed model and finishes only after binding and test deli
     store,
     availableModels: ["opencode-go/qwen3.7-max"],
     configuredModel: "opencode-go/qwen3.7-max",
+    pluginName: "@wekux/opencode-wechat-approve-plugin@1.0.3",
     confirmModel: async (model) => {
       calls.push(["confirm", model])
       return true
@@ -109,7 +125,10 @@ test("persists the confirmed model and finishes only after binding and test deli
     ["finalize-plugin"],
   ])
   assert.equal(store.loadPluginConfig().model, "opencode-go/qwen3.7-max")
-  assert.match(readFileSync(configFile, "utf8"), /opencode-wechat-approve-plugin/)
+  assert.match(
+    readFileSync(configFile, "utf8"),
+    /@wekux\/opencode-wechat-approve-plugin@1\.0\.3/,
+  )
 })
 
 test("rejects unavailable models and incomplete binding", async () => {

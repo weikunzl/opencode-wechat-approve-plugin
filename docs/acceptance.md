@@ -51,6 +51,8 @@ visible WeChat conversation title is exactly `微信ClawBot`. It must stop on an
 mismatch and must not inspect or interact with another conversation.
 
 1. Run `npx @wekux/opencode-wechat-approve-plugin install`.
+   Confirm the resulting global `plugin` entry is the registry spec
+   `@wekux/opencode-wechat-approve-plugin@1.0.2`, not a local `file://` path.
 2. Confirm an available provider/model.
 3. Scan the QR code, send `绑定`, and receive the test notification.
 4. Start `opencode web` and confirm `doctor` is fully green（本轮已验证 plugin、binding、model、server 四项 OK）。

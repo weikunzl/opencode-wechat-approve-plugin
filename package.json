@@ -1,6 +1,6 @@
 {
   "name": "@wekux/opencode-wechat-approve-plugin",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "OpenCode WeChat notifications and remote permission approvals via the ilink API",
   "engines": {
     "node": ">=20"

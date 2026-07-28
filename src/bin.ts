@@ -11,10 +11,9 @@ import qrcode from "qrcode-terminal"
 import { doctorInstallation, parseOpenCodePaths, resolveEffectiveModel } from "./cli.js"
 import { IlinkClientTransport } from "./client.js"
 import {
-  commitLocalPlugin,
   install,
-  localPluginSpec,
   PACKAGE_NAME,
+  registryPluginSpec,
 } from "./install.js"
 import { WeChatStore } from "./store.js"
 import { WeChatGateway } from "./wechat-gateway.js"
@@ -61,7 +60,7 @@ async function main(args: string[]): Promise<number> {
   const modelState = readJSON(path.join(paths.state, "model.json"))
   const proposed = resolveEffectiveModel(resolvedConfig, modelState)
   const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
-  const pluginSpec = localPluginSpec(configDirectory)
+  const pluginSpec = registryPluginSpec(packageRoot)
   const terminal = readline.createInterface({ input: process.stdin, output: process.stdout })
   try {
     const configuredModel =
@@ -81,7 +80,6 @@ async function main(args: string[]): Promise<number> {
       bind: async (force) => bind(gateway, force),
       sendTest: async () => sendTest(gateway),
       pluginName: pluginSpec,
-      commitPlugin: () => commitLocalPlugin(packageRoot, configDirectory),
     })
   } finally {
     terminal.close()

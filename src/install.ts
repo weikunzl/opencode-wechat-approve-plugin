@@ -5,7 +5,18 @@ import { applyEdits, modify, parse } from "jsonc-parser"
 import { loadPluginConfig } from "./config.js"
 import { WeChatStore } from "./store.js"
 
-export const PACKAGE_NAME = "opencode-wechat-approve-plugin"
+export const PACKAGE_NAME = "@wekux/opencode-wechat-approve-plugin"
+const LEGACY_PACKAGE_NAME = "opencode-wechat-approve-plugin"
+
+export function registryPluginSpec(packageRoot: string): string {
+  // 从发布包元数据读取版本，避免安装器与 package.json 版本漂移。
+  const file = path.join(packageRoot, "package.json")
+  const metadata = JSON.parse(fs.readFileSync(file, "utf8")) as { version?: unknown }
+  if (typeof metadata.version !== "string" || !metadata.version) {
+    throw new Error("安装包缺少有效版本号")
+  }
+  return `${PACKAGE_NAME}@${metadata.version}`
+}
 
 export interface PluginCommit {
   pluginSpec: string
@@ -18,7 +29,7 @@ export function localPluginSpec(configDirectory: string): string {
     path.join(
       configDirectory,
       "managed-plugins",
-      PACKAGE_NAME,
+      LEGACY_PACKAGE_NAME,
       "dist",
       "index.js",
     ),
@@ -36,10 +47,10 @@ export function commitLocalPlugin(
   }
 
   const managedDirectory = path.join(configDirectory, "managed-plugins")
-  const target = path.join(managedDirectory, PACKAGE_NAME)
+  const target = path.join(managedDirectory, LEGACY_PACKAGE_NAME)
   const temporary = path.join(
     managedDirectory,
-    `.${PACKAGE_NAME}.${process.pid}.${Date.now()}.tmp`,
+    `.${LEGACY_PACKAGE_NAME}.${process.pid}.${Date.now()}.tmp`,
   )
   const backup = `${target}.previous`
   fs.mkdirSync(managedDirectory, { recursive: true })
@@ -125,10 +136,11 @@ export function patchOpenCodeConfig(source: string, patch: ConfigPatch): string 
 
 export function isOwnedPluginSpec(spec: string): boolean {
   if (spec === PACKAGE_NAME || spec.startsWith(`${PACKAGE_NAME}@`)) return true
+  if (spec === LEGACY_PACKAGE_NAME || spec.startsWith(`${LEGACY_PACKAGE_NAME}@`)) return true
   if (!spec.startsWith("file:")) return false
   try {
     const pathname = decodeURIComponent(new URL(spec).pathname).replaceAll("\\", "/")
-    return pathname.endsWith(`/${PACKAGE_NAME}/dist/index.js`)
+    return pathname.endsWith(`/${LEGACY_PACKAGE_NAME}/dist/index.js`)
   } catch {
     return false
   }
