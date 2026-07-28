@@ -28,7 +28,7 @@ E2E_NPM_SPEC=@wekux/opencode-wechat-approve-plugin npm run test:e2e
 ```
 
 安装验收还应检查全局 OpenCode `plugin` 数组包含带版本的 registry 规格
-（如 `@wekux/opencode-wechat-approve-plugin@1.0.4`），不应回退到本地
+（如 `@wekux/opencode-wechat-approve-plugin@1.0.5`），不应回退到本地
 `file://` 托管路径。
 
 默认 smoke 不触发扫码、不写入真实绑定或微信状态。需要真实验收时，必须显式运行：
@@ -52,7 +52,7 @@ npm run test:e2e:live
 | E2E-01 | npx 安装后 `--help` 显示 install、bind、doctor | `scripts/e2e-smoke.js`（CLI/registry） | 已验证 |
 | E2E-02 | install 只接受可用模型，保留 JSONC 注释并原子写入配置 | `test/install.test.js`（单元/内存） | npx install 已验证；新绑定未验证 |
 | E2E-03 | 绑定成功后收到唯一测试通知；绑定不完整则不提交配置 | `test/install.test.js`、`test/wechat-gateway.test.js`（单元/内存） | 未验证 |
-| E2E-04 | doctor 独立报告插件、绑定、模型和服务健康状态 | `test/cli.test.js`（HTTP） | 已验证：registry 1.0.4 环境四项均为 OK |
+| E2E-04 | doctor 独立报告插件、绑定、模型和服务健康状态 | `test/cli.test.js`（HTTP） | 已验证：registry 1.0.5 环境四项均为 OK |
 | E2E-05 | busy→idle 只发一次 Done；失败只发一次 Error 且无 Done | `test/session-notifier.test.js`、`test/integration.test.js`（单元/HTTP 内存 fake） | 真实观察到审批通知与结果；失败链路未验证 |
 | E2E-06 | 取消显示 Cancelled；超时自动拒绝 | `test/session-notifier.test.js`、`test/plugin.test.js`（单元/HTTP 内存） | 真实微信仅观察到 Timeout；Cancelled 未验证 |
 | E2E-07 | 批量、混合和逐个回复精确对应 request ID | `test/approval-manager.test.js`、`test/integration.test.js`（fake PermissionAPI） | registry 1.0.2 + 真实微信已验证 once/always/reject、混合和逐个 |
@@ -60,7 +60,7 @@ npm run test:e2e:live
 | E2E-09 | 普通文本、群聊和未绑定发送者不触发模型或审批 | `test/plugin.test.js`、`test/wechat-gateway.test.js`（单元/内存） | 未验证 |
 | E2E-10 | 重启后 outbox 重放、入站消息去重，不重复通知；新入站 context 可重发 outbox | `test/wechat-gateway.test.js`（内存） | 未验证 |
 | E2E-11 | 原生 OpenCode 回复与插件回复并发时只保留有效结果 | `test/approval-manager.test.js`（HTTP fake） | 未验证 |
-| E2E-12 | 第二个插件实例不重复轮询，并把事件转交租约持有者；凭据文件保持私有权限 | `test/plugin.test.js`、`test/runtime-lease.test.js`、`test/store.test.js`（单元） | registry 1.0.4 未含修复；真实阻塞 |
+| E2E-12 | 第二个插件实例不重复轮询，并把事件转交租约持有者；凭据文件保持私有权限 | `test/plugin.test.js`、`test/runtime-lease.test.js`、`test/store.test.js`（单元） | registry 1.0.5 已含修复；真实待门禁 |
 
 语义转述安全矩阵由 `test/semantic-approval.test.js` 独立覆盖：单请求 once、多请求目标、always 持久语义、模糊澄清、否定/疑问拦截和未知 requestID 拒绝。fake model 的自然语言输入与 pending 请求会在提示词中逐项断言，输出仍经过本地决定和 request ID 校验；这不是真实模型端到端验收。真实 registry 模型已验证“查看最近提交记录并放行一次”映射为唯一 request 的 once；模糊、否定、疑问和模型升级决定仍未做真实验收。
 
@@ -70,7 +70,7 @@ REAL-00 至 REAL-18 的逐项前置条件、操作、预期和证据规则见 [`
 
 ## 本轮真实 registry 记录
 
-以下历史记录均在标题严格为 `微信ClawBot` 的真实微信会话中观察，插件来源为 npm registry 的 `@wekux/opencode-wechat-approve-plugin@1.0.2`；request ID 不含 token。它们不能替代 registry 1.0.4 本轮证据。
+以下历史记录均在标题严格为 `微信ClawBot` 的真实微信会话中观察，插件来源为 npm registry 的 `@wekux/opencode-wechat-approve-plugin@1.0.2`；request ID 不含 token。它们不能替代 registry 1.0.5 本轮证据。
 
 | 场景 | 微信原文与可见结果 | request ID → decision | pending |
 | --- | --- | --- | --- |
@@ -111,7 +111,7 @@ registry npx：通过/未发布/失败原因
 
 早期绑定上下文曾返回 `ret/errcode=-14`，导致一次 `prepare failed`；按诊断流程 force bind、重新扫码并刷新 context 后，registry 1.0.2 审批通知已恢复。该历史失败仍作为恢复风险记录，不能把它与后续成功消息混为同一证据。
 
-本轮 registry 1.0.4 诊断记录：doctor 四项均为 OK，但已检查的 registry `dist/index.js` 不含租约持有者事件转发；多目录中非租约持有者的 `runtime.start()` 返回 false 时会丢弃 `permission.asked`，所以 REAL-00 的插件通知门禁阻塞。源码修复与回归测试尚未重新发布，当前 REAL-00 标记 `BLOCKED`，其余 REAL 场景标记 `UNVERIFIED`。
+本轮 registry 1.0.5 诊断记录：doctor 四项均为 OK，发布 `dist/index.js` 已包含租约持有者事件转发；服务已重启并使用全局 registry spec。REAL-00 屏幕显示为“微信 ClawBot”（含空格），不符合严格标题“微信ClawBot”，因此未发送诊断消息，REAL-00 标记 `BLOCKED`，其余 REAL 场景标记 `UNVERIFIED`。
 
 ### `prepare failed` 处理记录
 

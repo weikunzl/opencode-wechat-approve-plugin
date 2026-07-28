@@ -22,7 +22,7 @@
 
 REAL-00 至 REAL-18 的安全与恢复验收矩阵见 [`docs/approval-security-matrix.md`](approval-security-matrix.md)。真实 live 仍必须逐项观察微信原文，不能用 fake model、HTTP 或内存结果替代。
 
-本轮诊断已确认：registry 1.0.4 的 OpenCode 事件可到达插件，但多目录实例中非租约持有者曾因 `runtime.start() = false` 直接丢弃 `permission.asked`；直接 transport `sendText` 可见不等于插件 hook 已验证。源码已增加租约持有者事件转发回归测试，但已检查的 1.0.4 包尚未包含该修复；在重新发布并于微信ClawBot看到诊断原文前，REAL-00 为 `BLOCKED`，REAL-01 至 REAL-18 为 `UNVERIFIED`（历史 1.0.2 记录保持原版本标注）。
+本轮诊断已确认：registry 1.0.5 已包含租约持有者事件转发，服务也已重启加载该 registry spec；但屏幕标题显示“微信 ClawBot”（含空格），不符合严格“微信ClawBot”，因此未发送诊断原文。REAL-00 为 `BLOCKED`，REAL-01 至 REAL-18 为 `UNVERIFIED`（历史 1.0.2 记录保持原版本标注）。
 
 可用 `npm run test:e2e:status` 做一轮无副作用状态扫描，或用 `npm run test:e2e:status -- --interval=30000` 周期扫描 OpenCode pending、本地 pending/outbox 和 context 年龄。扫描器不会读取微信屏幕，也不会自动把任何真实场景标记为通过；每轮仍需人工记录微信原文、脱敏 requestID/decision 和清理结果。
 
@@ -58,7 +58,7 @@ mismatch and must not inspect or interact with another conversation.
 
 1. Run `npx @wekux/opencode-wechat-approve-plugin install`.
    Confirm the resulting global `plugin` entry is the registry spec
-   `@wekux/opencode-wechat-approve-plugin@1.0.4`, not a local `file://` path.
+   `@wekux/opencode-wechat-approve-plugin@1.0.5`, not a local `file://` path.
 2. Confirm an available provider/model.
 3. Scan the QR code, send `绑定`, and receive the test notification.
 4. Start `opencode web` and confirm `doctor` is fully green（本轮已验证 plugin、binding、model、server 四项 OK）。
