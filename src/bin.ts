@@ -23,12 +23,19 @@ import {
 import { WeChatStore } from "./store.js"
 import { WeChatGateway } from "./wechat-gateway.js"
 
+enum CliCommand {
+  Setup = "setup",
+  Install = "install",
+  Bind = "bind",
+  Doctor = "doctor",
+  Help = "help",
+  LongHelp = "--help",
+  ShortHelp = "-h",
+}
+
 async function main(args: string[]): Promise<number> {
-  const command = args[0] ?? "help"
-  if (!["install", "bind", "doctor", "help", "--help", "-h"].includes(command)) {
-    throw new Error(`未知命令: ${command}`)
-  }
-  if (["help", "--help", "-h"].includes(command)) {
+  const command = parseCommand(args)
+  if (isHelpCommand(command)) {
     printHelp()
     return 0
   }
@@ -40,7 +47,7 @@ async function main(args: string[]): Promise<number> {
   const stateDirectory = path.join(paths.home || path.dirname(paths.config), ".opencode", "wechat-approve")
   const availableModels = lines(await runOpenCode(["models"]))
 
-  if (command === "doctor") {
+  if (command === CliCommand.Doctor) {
     const result = await doctorInstallation({
       configFile,
       stateDirectory,
@@ -54,7 +61,7 @@ async function main(args: string[]): Promise<number> {
 
   const store = new WeChatStore(stateDirectory)
   const gateway = new WeChatGateway(store, new IlinkClientTransport(store))
-  if (command === "bind") {
+  if (command === CliCommand.Bind) {
     await bind(gateway, true)
     await sendTest(gateway)
     process.stdout.write("微信绑定及测试通知成功。\n")
@@ -94,6 +101,20 @@ async function main(args: string[]): Promise<number> {
   process.stdout.write(`安装完成。插件 ${PACKAGE_NAME} 已写入全局配置。\n`)
   process.stdout.write("请分别启动 OpenCode 会话；插件会自动共享绑定并选举微信网关 Leader。\n")
   return 0
+}
+
+function parseCommand(args: string[]): CliCommand {
+  // 只接受声明过的子命令，避免把拼写错误当成安装动作执行。
+  const command = args[0] ?? CliCommand.Help
+  if (!Object.values(CliCommand).includes(command as CliCommand)) {
+    throw new Error(`未知命令: ${command}`)
+  }
+  return command as CliCommand
+}
+
+function isHelpCommand(command: CliCommand): boolean {
+  // 将三种帮助写法归为同一只读分支。
+  return [CliCommand.Help, CliCommand.LongHelp, CliCommand.ShortHelp].includes(command)
 }
 
 async function bind(gateway: WeChatGateway, force = false): Promise<void> {
@@ -168,7 +189,8 @@ function firstLine(value: string): string {
 function printHelp(): void {
   process.stdout.write(
     [
-      "wechat-approve install   配置插件、确认模型并扫码绑定",
+      "wechat-approve setup     首次配置插件、确认模型并扫码绑定",
+      "wechat-approve install   setup 的兼容别名",
       "wechat-approve bind      重新扫码或补充绑定消息",
       "wechat-approve doctor    检查插件、模型、绑定和共享运行时",
       "",

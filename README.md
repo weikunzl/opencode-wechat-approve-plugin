@@ -41,10 +41,20 @@ OpenCode instance C ─┘
 - OpenCode 1.x，且支持官方 `plugin` hook 与注入式 SDK client
 - 支持 iLink Bot 的微信账号
 
-执行：
+首次使用时，先显式执行初始化：
 
 ```bash
-npx @wekux/opencode-wechat-approve-plugin install
+npm exec --yes --package=@wekux/opencode-wechat-approve-plugin -- wechat-approve setup
+```
+
+`npm exec` 显式指定了包内的 `wechat-approve` 可执行文件，可避免部分
+`npx` 环境无法解析 bin 的问题。`setup` 会依次要求确认审批解释模型、
+将必要的 `bash: ask` 规则以 JSONC 最小补丁写入配置，并显示二维码完成微信绑定。
+它不会覆盖 MCP、其他插件、模型或显式 `deny` 规则。也可以选择全局安装：
+
+```bash
+npm install -g @wekux/opencode-wechat-approve-plugin
+wechat-approve setup
 ```
 
 安装器会：
@@ -57,9 +67,20 @@ npx @wekux/opencode-wechat-approve-plugin install
 6. 扫码确认后等待用户向机器人发送固定文本 `绑定`；
 7. 发送测试通知，成功后才完成安装。
 
-安装器会把当前发布版本的 npm registry 规格（例如
-`@wekux/opencode-wechat-approve-plugin@1.1.0`）写入 OpenCode 的 `plugin` 数组，
-不会把本地 `file://` 托管副本作为最终插件入口。
+初始化成功后，安装器会把当前发布版本的 npm registry 规格写入 OpenCode 的
+`plugin` 数组。配置与 `opencode-notify` 等 npm 插件相同，不会使用本地
+`file://` 托管副本作为最终入口：
+
+```json
+{
+  "plugin": [
+    "@wekux/opencode-wechat-approve-plugin@1.1.0"
+  ]
+}
+```
+
+无需手工覆盖现有数组；`setup` 会保留其他插件和 JSONC 注释。旧命令
+`wechat-approve install` 仍可用，作为 `setup` 的兼容别名。
 
 安装完成后重新启动 OpenCode 会话，使自动写入的审批规则参与权限计算；不需要启动独立 server。
 
@@ -93,7 +114,7 @@ npx @wekux/opencode-wechat-approve-plugin install
 ## 诊断与恢复
 
 ```bash
-npx @wekux/opencode-wechat-approve-plugin doctor
+npm exec --yes --package=@wekux/opencode-wechat-approve-plugin -- wechat-approve doctor
 ```
 
 `doctor` 分别检查：
@@ -108,17 +129,17 @@ npx @wekux/opencode-wechat-approve-plugin doctor
 补充或恢复绑定：
 
 ```bash
-npx @wekux/opencode-wechat-approve-plugin bind
+npm exec --yes --package=@wekux/opencode-wechat-approve-plugin -- wechat-approve bind
 ```
 
 常见问题：
 
 | 现象 | 处理 |
 | --- | --- |
-| 多个实例没有通知 | 确认各 OpenCode 会话均加载相同 registry 插件规格，并运行 `doctor` 检查实例和 Leader |
-| `Model not found: opencode/...` | 运行 `doctor`，重新安装并选择 `opencode models` 中存在的完整 provider/model |
-| 能收到旧消息但收不到主动通知 | 运行 `bind`，向机器人发送一次固定文本 `绑定` |
-| `sendmessage` 返回 `prepare failed` | 先查看脱敏 `ret`、`errcode`、`errmsg`、`baseHost` 和 `contextAgeMs`；若为 `-14`，运行 `bind` 重新扫码并发送 `绑定`；其他错误等待新入站 context 后由 outbox 重试 |
+| 多个实例没有通知 | 确认各 OpenCode 会话均加载相同 registry 插件规格，并运行上方的 `doctor` 命令检查实例和 Leader |
+| `Model not found: opencode/...` | 运行上方的 `doctor` 命令，重新安装并选择 `opencode models` 中存在的完整 provider/model |
+| 能收到旧消息但收不到主动通知 | 运行上方的 `bind` 命令，向机器人发送一次固定文本 `绑定` |
+| `sendmessage` 返回 `prepare failed` | 先查看脱敏 `ret`、`errcode`、`errmsg`、`baseHost` 和 `contextAgeMs`；若为 `-14`，运行上方的 `bind` 命令重新扫码并发送 `绑定`；其他错误等待新入站 context 后由 outbox 重试 |
 | 多项目重复通知 | 检查共享状态目录权限和 Leader 租约；实例事件通过 mailbox 去重，不需要 attach |
 | 微信回复“继续”没有反应 | 这是 V1 的预期行为；普通消息不会驱动 AI 会话 |
 
