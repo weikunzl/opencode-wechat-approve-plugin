@@ -74,7 +74,7 @@ wechat-approve setup
 ```json
 {
   "plugin": [
-    "@wekux/opencode-wechat-approve-plugin@1.1.1"
+    "@wekux/opencode-wechat-approve-plugin@latest"
   ]
 }
 ```
