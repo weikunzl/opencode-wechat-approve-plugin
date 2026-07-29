@@ -74,7 +74,7 @@ wechat-approve setup
 ```json
 {
   "plugin": [
-    "@wekux/opencode-wechat-approve-plugin@1.1.0"
+    "@wekux/opencode-wechat-approve-plugin@1.1.1"
   ]
 }
 ```
@@ -138,6 +138,7 @@ npm exec --yes --package=@wekux/opencode-wechat-approve-plugin -- wechat-approve
 | --- | --- |
 | 多个实例没有通知 | 确认各 OpenCode 会话均加载相同 registry 插件规格，并运行上方的 `doctor` 命令检查实例和 Leader |
 | `Model not found: opencode/...` | 运行上方的 `doctor` 命令，重新安装并选择 `opencode models` 中存在的完整 provider/model |
+| `微信 API 网络错误` | 根据提示中的安全错误码检查网络：`ENOTFOUND`/`EAI_AGAIN` 检查 DNS 或代理；`ECONNREFUSED`/`ENETUNREACH` 检查网络、防火墙或代理；超时检查网络质量和代理可达性 |
 | 能收到旧消息但收不到主动通知 | 运行上方的 `bind` 命令，向机器人发送一次固定文本 `绑定` |
 | `sendmessage` 返回 `prepare failed` | 先查看脱敏 `ret`、`errcode`、`errmsg`、`baseHost` 和 `contextAgeMs`；若为 `-14`，运行上方的 `bind` 命令重新扫码并发送 `绑定`；其他错误等待新入站 context 后由 outbox 重试 |
 | 多项目重复通知 | 检查共享状态目录权限和 Leader 租约；实例事件通过 mailbox 去重，不需要 attach |

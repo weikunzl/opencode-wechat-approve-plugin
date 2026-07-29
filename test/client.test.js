@@ -7,6 +7,50 @@ import test from "node:test"
 import { IlinkApiError, IlinkClientTransport, IlinkErrorCode } from "../dist/client.js"
 import { WeChatStore } from "../dist/store.js"
 
+test("reports a DNS failure with actionable WeChat API guidance", async () => {
+  // 模拟 Node fetch 把 DNS 错误隐藏在 cause 中的真实错误结构。
+  const store = new WeChatStore(mkdtempSync(join(tmpdir(), "wechat-client-network-")))
+  store.saveAccount({
+    accountId: "bot",
+    token: "secret",
+    baseUrl: "https://ilink.example.invalid",
+    userId: "owner",
+    savedAt: "2026-07-29T00:00:00.000Z",
+  })
+  const cause = Object.assign(new Error("getaddrinfo ENOTFOUND ilink.example.invalid"), {
+    code: "ENOTFOUND",
+  })
+  const transport = new IlinkClientTransport(store, async () => {
+    // 网络替身只模拟外部 fetch 失败，错误转换仍由真实客户端完成。
+    throw new TypeError("fetch failed", { cause })
+  })
+
+  await assert.rejects(transport.sendText("owner", "hello", "context", "network-1"), (error) => {
+    assert.equal(error.name, "IlinkNetworkError")
+    assert.match(error.message, /无法解析微信 API 地址.*DNS 或代理/)
+    assert.match(error.message, /code=ENOTFOUND.*endpoint=\/ilink\/bot\/sendmessage/)
+    assert.doesNotMatch(error.message, /secret|owner|context|ilink\.example/)
+    return true
+  })
+})
+
+test("reports a refused connection while requesting a WeChat QR code", async () => {
+  // 首次扫码走独立 GET 路径，也必须返回可操作的网络诊断。
+  const store = new WeChatStore(mkdtempSync(join(tmpdir(), "wechat-client-network-")))
+  const cause = Object.assign(new Error("connect ECONNREFUSED"), { code: "ECONNREFUSED" })
+  const transport = new IlinkClientTransport(store, async () => {
+    // 仅替换外部网络边界，验证 login 的真实错误传播。
+    throw new TypeError("fetch failed", { cause })
+  })
+
+  await assert.rejects(transport.login(), (error) => {
+    assert.equal(error.name, "IlinkNetworkError")
+    assert.match(error.message, /无法连接微信 API.*网络、代理或防火墙/)
+    assert.match(error.message, /code=ECONNREFUSED.*endpoint=\/ilink\/bot\/get_bot_qrcode/)
+    return true
+  })
+})
+
 test("rejects a successful HTTP response containing a failed WeChat ret code", async () => {
   const store = new WeChatStore(mkdtempSync(join(tmpdir(), "wechat-client-")))
   store.saveAccount({

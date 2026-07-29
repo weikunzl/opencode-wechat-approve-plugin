@@ -7,9 +7,32 @@ import { WeChatStore } from "./store.js"
 const ILINK_BASE = "https://ilinkai.weixin.qq.com"
 const BOT_TYPE = "3"
 const LONG_POLL_TIMEOUT_MS = 35_000
+const NETWORK_CODE_LIMIT = 32
+const NETWORK_CODE_PATTERN = /^[A-Z0-9_]+$/
 
 export enum IlinkErrorCode {
   SessionTimeout = -14,
+}
+
+export enum IlinkNetworkFailure {
+  Dns = "dns",
+  Connection = "connection",
+  Timeout = "timeout",
+  Tls = "tls",
+  Unknown = "unknown",
+}
+
+enum NetworkErrorCode {
+  DnsNotFound = "ENOTFOUND",
+  DnsAgain = "EAI_AGAIN",
+  ConnectionRefused = "ECONNREFUSED",
+  ConnectionReset = "ECONNRESET",
+  NetworkUnreachable = "ENETUNREACH",
+  HostUnreachable = "EHOSTUNREACH",
+  TimedOut = "ETIMEDOUT",
+  CertificateExpired = "CERT_HAS_EXPIRED",
+  CertificateInvalid = "UNABLE_TO_VERIFY_LEAF_SIGNATURE",
+  SelfSignedCertificate = "DEPTH_ZERO_SELF_SIGNED_CERT",
 }
 
 export interface IlinkApiFailure {
@@ -37,6 +60,31 @@ export class IlinkApiError extends Error {
   get code(): number | undefined {
     return failureCode(this.details)
   }
+}
+
+export class IlinkNetworkError extends Error {
+  readonly endpoint: string
+  readonly code: string | undefined
+  readonly kind: IlinkNetworkFailure
+
+  constructor(endpoint: string, error: unknown) {
+    // 将底层 fetch cause 转成可操作、无凭据的网络诊断。
+    const code = networkErrorCode(error)
+    const kind = classifyNetworkFailure(error, code)
+    super(`微信 API 网络错误: ${networkFailureAdvice(kind)} code=${code ?? "unknown"} endpoint=${endpoint}`, {
+      cause: error,
+    })
+    this.name = "IlinkNetworkError"
+    this.endpoint = endpoint
+    this.code = code
+    this.kind = kind
+  }
+}
+
+interface NetworkRequest {
+  endpoint: string
+  url: string | URL
+  init: RequestInit
 }
 
 export function isSessionTimeoutError(error: unknown): boolean {
@@ -183,18 +231,22 @@ export class IlinkClientTransport implements IlinkTransport {
 
     const bodyText = JSON.stringify(body)
     const url = new URL(endpoint, withTrailingSlash(account.baseUrl))
-    const response = await this.fetcher(url, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        AuthorizationType: "ilink_bot_token",
-        Authorization: `Bearer ${account.token}`,
-        "X-WECHAT-UIN": randomWechatUin(),
+    const response = await this.request({
+      endpoint: url.pathname,
+      url,
+      init: {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          AuthorizationType: "ilink_bot_token",
+          Authorization: `Bearer ${account.token}`,
+          "X-WECHAT-UIN": randomWechatUin(),
+        },
+        body: bodyText,
+        signal: signal
+          ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)])
+          : AbortSignal.timeout(timeoutMs),
       },
-      body: bodyText,
-      signal: signal
-        ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)])
-        : AbortSignal.timeout(timeoutMs),
     })
     const text = await response.text()
     if (!response.ok) {
@@ -212,9 +264,24 @@ export class IlinkClientTransport implements IlinkTransport {
   }
 
   private async fetchJSON(url: string): Promise<unknown> {
-    const response = await this.fetcher(url, { signal: AbortSignal.timeout(15_000) })
+    const target = new URL(url)
+    const response = await this.request({
+      endpoint: target.pathname,
+      url: target,
+      init: { signal: AbortSignal.timeout(15_000) },
+    })
     if (!response.ok) throw new Error(`微信 API 请求失败: HTTP ${response.status}`)
     return response.json()
+  }
+
+  private async request(options: NetworkRequest): Promise<Response> {
+    // 所有微信 fetch 统一在此保留底层错误码并移除敏感请求信息。
+    try {
+      return await this.fetcher(options.url, options.init)
+    } catch (error) {
+      if (error instanceof IlinkNetworkError) throw error
+      throw new IlinkNetworkError(options.endpoint, error)
+    }
   }
 }
 
@@ -227,6 +294,8 @@ function randomWechatUin(): string {
 }
 
 function isTimeout(error: unknown): boolean {
+  // 包装后的网络超时仍用于轮询重试判断。
+  if (error instanceof IlinkNetworkError) return error.kind === IlinkNetworkFailure.Timeout
   return error instanceof Error && (error.name === "AbortError" || error.name === "TimeoutError")
 }
 
@@ -277,4 +346,62 @@ function sanitizeErrorMessage(value: string | undefined): string | undefined {
     .slice(0, 200)
     .replace(/Bearer\s+\S+/gi, "Bearer [REDACTED]")
     .replace(/(?:context|bot)[_-]?token["'=:\s]+[^\s,}]+/gi, "token=[REDACTED]")
+}
+
+function networkErrorCode(error: unknown): string | undefined {
+  // Node fetch 通常把系统错误码放在 cause，兼容顶层直抛形态。
+  const direct = safeNetworkCode(error)
+  if (direct) return direct
+  return safeNetworkCode(isRecord(error) ? error.cause : undefined)
+}
+
+function safeNetworkCode(value: unknown): string | undefined {
+  // 只允许短大写错误码进入日志，拒绝服务端文本和任意对象内容。
+  if (!isRecord(value) || typeof value.code !== "string") return undefined
+  const code = value.code.slice(0, NETWORK_CODE_LIMIT)
+  return NETWORK_CODE_PATTERN.test(code) ? code : undefined
+}
+
+function classifyNetworkFailure(error: unknown, code: string | undefined): IlinkNetworkFailure {
+  // 按系统错误码映射为稳定的用户处理建议。
+  if (isNativeTimeout(error) || code === NetworkErrorCode.TimedOut) return IlinkNetworkFailure.Timeout
+  if (code === NetworkErrorCode.DnsNotFound || code === NetworkErrorCode.DnsAgain) {
+    return IlinkNetworkFailure.Dns
+  }
+  if (isConnectionCode(code)) return IlinkNetworkFailure.Connection
+  if (isTlsCode(code)) return IlinkNetworkFailure.Tls
+  return IlinkNetworkFailure.Unknown
+}
+
+function isNativeTimeout(error: unknown): boolean {
+  // 原生 AbortSignal 超时没有稳定 code，只能依据标准错误名识别。
+  return error instanceof Error && (error.name === "AbortError" || error.name === "TimeoutError")
+}
+
+function isConnectionCode(code: string | undefined): boolean {
+  // 连接拒绝、重置与路由不可达统一提示检查网络边界。
+  return [
+    NetworkErrorCode.ConnectionRefused,
+    NetworkErrorCode.ConnectionReset,
+    NetworkErrorCode.NetworkUnreachable,
+    NetworkErrorCode.HostUnreachable,
+  ].includes(code as NetworkErrorCode)
+}
+
+function isTlsCode(code: string | undefined): boolean {
+  // 常见证书错误提示检查系统时间、证书与中间代理。
+  return [
+    NetworkErrorCode.CertificateExpired,
+    NetworkErrorCode.CertificateInvalid,
+    NetworkErrorCode.SelfSignedCertificate,
+  ].includes(code as NetworkErrorCode)
+}
+
+function networkFailureAdvice(kind: IlinkNetworkFailure): string {
+  // 为每类网络故障提供直接可执行的排查方向。
+  if (kind === IlinkNetworkFailure.Dns) return "无法解析微信 API 地址，请检查 DNS 或代理"
+  if (kind === IlinkNetworkFailure.Connection) return "无法连接微信 API，请检查网络、代理或防火墙"
+  if (kind === IlinkNetworkFailure.Timeout) return "连接微信 API 超时，请检查网络或代理"
+  if (kind === IlinkNetworkFailure.Tls) return "微信 API TLS 连接失败，请检查系统时间、证书或代理"
+  return "微信 API 网络请求失败，请检查网络、代理或防火墙"
 }
