@@ -93,3 +93,23 @@ test("retains inbound mailbox event when owner handling fails", async () => {
   assert.equal(mailbox.readEvents().length, 1)
   await leader.stop()
 })
+
+test("starts polling when durable outbox recovery fails during restart", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "wechat-gateway-leader-outbox-"))
+  const harness = gatewayHarness()
+  harness.gateway.flushOutbox = async () => {
+    throw new Error("stale context")
+  }
+  let releases = 0
+  const leader = new GatewayLeader({
+    gateway: harness.gateway,
+    mailbox: new SharedMailbox(directory),
+    lease: { acquire: () => true, release: () => { releases += 1 } },
+    ownerInstanceID: "owner",
+  })
+
+  assert.equal(await leader.start(async () => {}), true)
+  assert.equal(harness.starts(), 1)
+  assert.equal(releases, 0)
+  await leader.stop()
+})

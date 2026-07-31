@@ -170,6 +170,20 @@ test("persists outbound notification until delivery succeeds", async () => {
   assert.deepEqual(store.loadOutbox(), [])
 })
 
+test("sends a transport health probe without adding it to the durable outbox", async () => {
+  const { gateway, store, sent } = harness()
+
+  await gateway.probe({
+    id: "health:start:one",
+    kind: "warning",
+    text: "重新连接",
+    createdAt: 1,
+  })
+
+  assert.equal(sent.length, 1)
+  assert.deepEqual(store.loadOutbox(), [])
+})
+
 test("keeps a failed outbound notification queued for retry", async () => {
   const { store } = harness()
   const gateway = new WeChatGateway(store, {

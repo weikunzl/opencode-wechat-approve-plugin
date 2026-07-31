@@ -161,20 +161,28 @@ export class WeChatGateway {
   }
 
   async send(notification: NotificationEnvelope): Promise<void> {
-    const safeNotification = {
-      ...notification,
-      text: sanitizeNotificationText(notification.text),
-    }
+    // 业务通知先持久化，只有 transport 成功后才确认出队。
+    const safeNotification = this.sanitize(notification)
     this.store.enqueueNotification(safeNotification)
+    await this.deliver(safeNotification)
+    this.store.ackNotification(safeNotification.id)
+  }
+
+  async probe(notification: NotificationEnvelope): Promise<void> {
+    // 健康探测不进入业务 outbox，避免恢复后发送过期的启动消息。
+    await this.deliver(this.sanitize(notification))
+  }
+
+  private async deliver(notification: NotificationEnvelope): Promise<void> {
+    // 每次发送都读取最新绑定，使外部 bind 无需重启 transport。
     const context = this.store.loadContext()
     if (!context) throw new Error("微信尚未绑定，缺少通知上下文")
-
     try {
       await this.transport.sendText(
         context.boundUserID,
-        safeNotification.text,
+        notification.text,
         context.contextToken,
-        safeNotification.id,
+        notification.id,
       )
     } catch (error) {
       const diagnostic = formatTransportError(error, this.store)
@@ -182,7 +190,11 @@ export class WeChatGateway {
       this.handleTransportError(error)
       throw new Error(diagnostic, { cause: error })
     }
-    this.store.ackNotification(safeNotification.id)
+  }
+
+  private sanitize(notification: NotificationEnvelope): NotificationEnvelope {
+    // 所有主动消息共用同一脱敏和长度边界。
+    return { ...notification, text: sanitizeNotificationText(notification.text) }
   }
 
   async flushOutbox(): Promise<void> {

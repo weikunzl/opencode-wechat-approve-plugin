@@ -32,7 +32,7 @@ export class GatewayLeader {
     // 只有租约持有者初始化 transport 和长轮询，其他进程保持插件事件可用。
     if (!this.options.lease.acquire()) return false
     if ((await this.options.gateway.initialize()) !== "ready") return this.stopBeforeStart()
-    await this.options.gateway.flushOutbox()
+    await this.recoverOutbox()
     this.configureRecorder()
     this.running = true
     this.options.gateway.start((message) => this.handleMessage(message, onMessage))
@@ -76,9 +76,23 @@ export class GatewayLeader {
     this.options.lease.release()
     return false
   }
+
+  private async recoverOutbox(): Promise<void> {
+    // 旧通知失败不能阻止长轮询启动，否则会形成持有租约的假 Leader。
+    try {
+      await this.options.gateway.flushOutbox()
+    } catch (error) {
+      console.error(`[wechat] 通知队列恢复失败: ${firstLine(error)}`)
+    }
+  }
 }
 
 function digest(value: string): string {
   // 邮箱只保存摘要，原始微信正文仍留在内存回调中处理。
   return crypto.createHash("sha256").update(value).digest("hex").slice(0, 16)
+}
+
+function firstLine(error: unknown): string {
+  // 日志只保留已由 gateway 脱敏的首行诊断。
+  return (error instanceof Error ? error.message : String(error)).split(/\r?\n/, 1)[0]
 }
