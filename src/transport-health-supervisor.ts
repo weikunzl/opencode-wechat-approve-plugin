@@ -14,6 +14,8 @@ enum HealthTiming {
   ContextStaleMs = 1_800_000,
   RetryBaseMs = 1_000,
   RetryMaximumMs = 300_000,
+  MonitorIntervalMs = 3_000,
+  ShutdownTimeoutMs = 2_000,
 }
 
 enum HealthMessage {
@@ -33,20 +35,45 @@ interface TransportHealthSupervisorOptions {
   store: WeChatStore
   gateway: HealthGateway
   now?: () => number
+  timers?: Partial<SupervisorTimers>
+  shutdownTimeoutMs?: number
+}
+
+interface SupervisorTimers {
+  setInterval(callback: () => void, milliseconds: number): unknown
+  clearInterval(id: unknown): void
+  setTimeout(callback: () => void, milliseconds: number): unknown
+  clearTimeout(id: unknown): void
+}
+
+export interface TransportStopOptions {
+  sendNotice: boolean
+  cleanShutdown?: boolean
 }
 
 export class TransportHealthSupervisor {
   private readonly now: () => number
+  private readonly timers: SupervisorTimers
+  private readonly shutdownTimeoutMs: number
+  private monitor: unknown = null
+  private running = false
+  private recovering = false
+  private onMessage: ((message: InboundApprovalMessage) => Promise<void>) | null = null
 
   constructor(private readonly options: TransportHealthSupervisorOptions) {
     // 时间源可注入，保证重启和退避边界可确定测试。
     this.now = options.now ?? Date.now
+    this.timers = { ...defaultTimers(), ...options.timers }
+    this.shutdownTimeoutMs = options.shutdownTimeoutMs ?? HealthTiming.ShutdownTimeoutMs
   }
 
   async start(onMessage: (message: InboundApprovalMessage) => Promise<void>): Promise<void> {
     // 先保留上次状态用于判断，再标记本次启动尚未正常关闭。
     const previous = this.options.store.loadTransportHealth()
+    this.running = true
+    this.onMessage = onMessage
     this.markStarting(previous)
+    this.startMonitor()
     if ((await this.options.gateway.initialize()) !== "ready") {
       this.markNeedsRebind()
       return
@@ -54,6 +81,15 @@ export class TransportHealthSupervisor {
     this.options.gateway.start(onMessage)
     if (this.shouldProbe(previous)) await this.probeAndReplay()
     else this.markHealthy(previous)
+  }
+
+  async stop(options: TransportStopOptions): Promise<void> {
+    // 停止监督器后不再接受恢复定时器，关闭通知只做有限等待。
+    this.running = false
+    this.stopMonitor()
+    if (options.sendNotice && this.isHealthy()) await this.sendStopNotice()
+    await this.options.gateway.stop()
+    this.markStopped(options.cleanShutdown ?? true)
   }
 
   private async probeAndReplay(): Promise<void> {
@@ -69,6 +105,28 @@ export class TransportHealthSupervisor {
         await this.options.gateway.stop()
       }
     }
+  }
+
+  private async recoverIfNeeded(): Promise<void> {
+    // 绑定代次或退避到期时，在同一 Leader 内恢复 transport。
+    if (!this.running || this.recovering) return
+    const state = this.options.store.loadTransportHealth()
+    const changed = state.bindingGenerationDigest !== this.bindingDigest()
+    if (!changed && !retryIsDue(state, this.now())) return
+    this.recovering = true
+    try {
+      await this.recover(state)
+    } finally {
+      this.recovering = false
+    }
+  }
+
+  private async recover(state: TransportHealthState): Promise<void> {
+    // 只有完整新绑定才能重新启动长轮询并验证真实发送。
+    if ((await this.options.gateway.initialize()) !== "ready") return
+    this.markRecovering(state)
+    if (this.onMessage) this.options.gateway.start(this.onMessage)
+    await this.probeAndReplay()
   }
 
   private shouldProbe(previous: TransportHealthState): boolean {
@@ -132,6 +190,15 @@ export class TransportHealthSupervisor {
     })
   }
 
+  private markRecovering(previous: TransportHealthState): void {
+    // 新绑定或退避到期先进入显式恢复态，doctor 不会提前报告健康。
+    this.options.store.saveTransportHealth({
+      ...previous,
+      status: TransportHealthStatus.Recovering,
+      bindingGenerationDigest: this.bindingDigest(),
+    })
+  }
+
   private markFailure(error: unknown): void {
     // 只保存受控失败类别，不持久化原始错误文本。
     const current = this.options.store.loadTransportHealth()
@@ -161,6 +228,16 @@ export class TransportHealthSupervisor {
     }
   }
 
+  private stopNotification(): NotificationEnvelope {
+    // 停止消息使用本次绑定摘要和时间，避免与启动探测共享幂等键。
+    return {
+      id: `transport-health:stop:${this.bindingDigest()}:${this.now()}`,
+      kind: "warning",
+      text: HealthMessage.Stopped,
+      createdAt: this.now(),
+    }
+  }
+
   private bindingDigest(): string {
     // 健康状态只使用凭据摘要比较绑定代次。
     const account = this.options.store.loadAccount()
@@ -170,6 +247,61 @@ export class TransportHealthSupervisor {
       baseUrl: account?.baseUrl ?? null,
       contextToken: context?.contextToken ?? null,
       contextUpdatedAt: context?.updatedAt ?? null,
+    })
+  }
+
+  private startMonitor(): void {
+    // 低频监督绑定代次与退避状态，不创建 OpenCode 外部守护进程。
+    if (this.monitor !== null) return
+    this.monitor = this.timers.setInterval(
+      () => void this.recoverIfNeeded(),
+      HealthTiming.MonitorIntervalMs,
+    )
+    unrefTimer(this.monitor)
+  }
+
+  private stopMonitor(): void {
+    // 释放插件时同步取消所有恢复检查。
+    if (this.monitor === null) return
+    this.timers.clearInterval(this.monitor)
+    this.monitor = null
+  }
+
+  private async sendStopNotice(): Promise<void> {
+    // 关闭通知失败或超时都不能阻塞 OpenCode 退出。
+    try {
+      await this.withTimeout(this.options.gateway.probe(this.stopNotification()))
+    } catch {}
+  }
+
+  private withTimeout(operation: Promise<void>): Promise<void> {
+    // 定时器可注入，测试无需等待真实的两秒关闭上限。
+    return new Promise((resolve, reject) => {
+      const timer = this.timers.setTimeout(resolve, this.shutdownTimeoutMs)
+      operation.then(
+        () => {
+          this.timers.clearTimeout(timer)
+          resolve()
+        },
+        (error) => {
+          this.timers.clearTimeout(timer)
+          reject(error)
+        },
+      )
+    })
+  }
+
+  private isHealthy(): boolean {
+    // 只有最近真实发送成功的 Leader 才能发送停止通知。
+    return this.options.store.loadTransportHealth().status === TransportHealthStatus.Healthy
+  }
+
+  private markStopped(cleanShutdown: boolean): void {
+    // 崩溃或租约丢失保留 false，下一位 Leader 会强制健康检查。
+    this.options.store.saveTransportHealth({
+      ...this.options.store.loadTransportHealth(),
+      status: TransportHealthStatus.Stopped,
+      cleanShutdown,
     })
   }
 }
@@ -196,4 +328,27 @@ function retryDelay(failures: number): number {
     HealthTiming.RetryMaximumMs,
     HealthTiming.RetryBaseMs * 2 ** Math.min(failures - 1, 10),
   )
+}
+
+function retryIsDue(state: TransportHealthState, now: number): boolean {
+  // 仅 degraded 状态按 nextRetryAt 主动重试，needs-rebind 必须等待新绑定。
+  return state.status === TransportHealthStatus.Degraded &&
+    state.nextRetryAt !== null && state.nextRetryAt <= now
+}
+
+function defaultTimers(): SupervisorTimers {
+  // 默认定时器完全依附当前 OpenCode 进程生命周期。
+  return {
+    setInterval: (callback, milliseconds) => globalThis.setInterval(callback, milliseconds),
+    clearInterval: (id) => globalThis.clearInterval(id as ReturnType<typeof setInterval>),
+    setTimeout: (callback, milliseconds) => globalThis.setTimeout(callback, milliseconds),
+    clearTimeout: (id) => globalThis.clearTimeout(id as ReturnType<typeof setTimeout>),
+  }
+}
+
+function unrefTimer(timer: unknown): void {
+  // Node 定时器不应单独阻止 OpenCode 进程退出。
+  if (timer && typeof timer === "object" && "unref" in timer) {
+    (timer as { unref(): void }).unref()
+  }
 }

@@ -113,3 +113,55 @@ test("starts polling when durable outbox recovery fails during restart", async (
   assert.equal(releases, 0)
   await leader.stop()
 })
+
+test("a secondary retries the lease and becomes the gateway leader", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "wechat-gateway-leader-takeover-"))
+  const harness = gatewayHarness()
+  const attempts = [false, true]
+  let retry
+  const transitions = []
+  const leader = new GatewayLeader({
+    gateway: harness.gateway,
+    mailbox: new SharedMailbox(directory),
+    lease: { acquire: () => attempts.shift(), release: () => {} },
+    ownerInstanceID: "owner",
+    timers: {
+      setTimeout: (callback) => {
+        retry = callback
+        return 1
+      },
+      clearTimeout: () => {},
+    },
+    random: () => 0,
+  })
+  leader.setLeadershipHandler((active) => transitions.push(active))
+
+  assert.equal(await leader.start(async () => {}), false)
+  retry()
+  await new Promise((resolve) => setImmediate(resolve))
+
+  assert.equal(harness.starts(), 1)
+  assert.deepEqual(transitions, [true])
+  await leader.stop()
+})
+
+test("passes the final-instance decision to supervised shutdown", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "wechat-gateway-leader-stop-notice-"))
+  const stopOptions = []
+  const leader = new GatewayLeader({
+    gateway: gatewayHarness().gateway,
+    mailbox: new SharedMailbox(directory),
+    lease: { acquire: () => true, release: () => {} },
+    ownerInstanceID: "owner",
+    supervisor: {
+      start: async () => {},
+      stop: async (options) => stopOptions.push(options),
+    },
+    shouldNotifyStop: () => false,
+  })
+
+  await leader.start(async () => {})
+  await leader.stop()
+
+  assert.deepEqual(stopOptions, [{ sendNotice: false }])
+})

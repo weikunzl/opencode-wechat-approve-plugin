@@ -37,7 +37,10 @@ function harness(options = {}) {
     stop: async () => calls.push("stop"),
     probe: async () => {
       calls.push("probe")
-      if (options.probeError) throw options.probeError
+      const error = typeof options.probeError === "function"
+        ? options.probeError()
+        : options.probeError
+      if (error) throw error
     },
     flushOutbox: async () => calls.push("flush"),
   }
@@ -48,6 +51,8 @@ function harness(options = {}) {
       store,
       gateway,
       now: () => 2_000_000,
+      timers: options.timers,
+      shutdownTimeoutMs: options.shutdownTimeoutMs,
     }),
   }
 }
@@ -93,4 +98,53 @@ test("stops the old transport and requires rebind after session timeout", async 
     TransportHealthStatus.NeedsRebind,
   )
   assert.equal(state.store.loadContext(), null)
+})
+
+test("detects a newly committed binding and recovers without OpenCode restart", async () => {
+  let interval
+  let probeAttempt = 0
+  const timeout = new IlinkApiError({
+    endpoint: "/ilink/bot/sendmessage",
+    ret: 0,
+    errcode: IlinkErrorCode.SessionTimeout,
+    errmsg: "session timeout",
+  })
+  const state = harness({
+    probeError: () => {
+      probeAttempt += 1
+      return probeAttempt === 1 ? timeout : null
+    },
+    timers: {
+      setInterval: (callback) => {
+        interval = callback
+        return 1
+      },
+      clearInterval: () => {},
+    },
+  })
+
+  await state.supervisor.start(async () => {})
+  seedBinding(state.store)
+  state.store.saveContext({
+    boundUserID: "owner",
+    contextToken: "fresh-context",
+    updatedAt: 2_000_001,
+  })
+  interval()
+  await new Promise((resolve) => setImmediate(resolve))
+
+  assert.equal(state.store.loadTransportHealth().status, TransportHealthStatus.Healthy)
+  assert.deepEqual(state.calls, ["start", "probe", "stop", "start", "probe", "flush"])
+})
+
+test("sends a best-effort stop notice and records a clean shutdown", async () => {
+  const state = harness()
+  await state.supervisor.start(async () => {})
+
+  await state.supervisor.stop({ sendNotice: true })
+
+  assert.equal(state.calls.filter((item) => item === "probe").length, 2)
+  assert.equal(state.calls.at(-1), "stop")
+  assert.equal(state.store.loadTransportHealth().status, TransportHealthStatus.Stopped)
+  assert.equal(state.store.loadTransportHealth().cleanShutdown, true)
 })

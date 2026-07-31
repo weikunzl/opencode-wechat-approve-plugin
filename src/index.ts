@@ -17,6 +17,7 @@ import { SharedMailbox } from "./shared-mailbox.js"
 import { RuntimeLease } from "./runtime-lease.js"
 import { SessionNotifier } from "./session-notifier.js"
 import { WeChatStore } from "./store.js"
+import { TransportHealthSupervisor } from "./transport-health-supervisor.js"
 import { WeChatGateway, type InboundApprovalMessage } from "./wechat-gateway.js"
 
 interface RuntimeGateway {
@@ -30,6 +31,8 @@ interface RuntimeGateway {
 interface RuntimeLeader {
   start(onMessage: (message: InboundApprovalMessage) => Promise<void>): Promise<boolean>
   stop(): Promise<void>
+  handleLeaseLoss?(): Promise<void>
+  setLeadershipHandler?(handler: (active: boolean) => void): void
 }
 
 interface RuntimeEventRouter {
@@ -38,6 +41,7 @@ interface RuntimeEventRouter {
 }
 
 interface RuntimeInstanceRegistry {
+  heartbeat(instanceID: string): void
   dispose(instanceID: string): void
 }
 
@@ -88,6 +92,10 @@ interface RuntimeTimers {
   clearInterval(id: unknown): void
 }
 
+enum RuntimeTiming {
+  InstanceHeartbeatMs = 10_000,
+}
+
 export function createPluginRuntime(dependencies: {
   gateway: RuntimeGateway
   approvalManager: RuntimeApprovalManager
@@ -121,6 +129,7 @@ export function createPluginRuntime(dependencies: {
   let deactivation: Promise<void> | null = null
   let leaderActive = false
   let eventDrainTimer: unknown = null
+  let instanceHeartbeatTimer: unknown = null
 
   const deactivate = (releaseLease: boolean): Promise<void> => {
     if (deactivation) return deactivation
@@ -134,13 +143,16 @@ export function createPluginRuntime(dependencies: {
       else await gateway.stop?.()
       if (eventDrainTimer !== null) timers.clearInterval(eventDrainTimer)
       eventDrainTimer = null
+      if (instanceHeartbeatTimer !== null) timers.clearInterval(instanceHeartbeatTimer)
+      instanceHeartbeatTimer = null
       if (dependencies.instanceRegistry && dependencies.instanceID) dependencies.instanceRegistry.dispose(dependencies.instanceID)
       if (releaseLease) lease?.release()
     })()
     return deactivation
   }
   lease?.setOnLost?.(() => {
-    void deactivate(false)
+    if (leader?.handleLeaseLoss) void leader.handleLeaseLoss()
+    else void deactivate(false)
   })
 
   const deliver = async (notifications: NotificationEnvelope[]): Promise<void> => {
@@ -245,15 +257,58 @@ export function createPluginRuntime(dependencies: {
   async function startNative(): Promise<boolean> {
     // 原生插件实例都加载成功，只有 Leader 负责绑定、轮询和恢复 outbox。
     active = true
-    leaderActive = await leader!.start(async (message) => {
+    startInstanceHeartbeat()
+    const coordinated = Boolean(leader?.setLeadershipHandler)
+    leader?.setLeadershipHandler?.(handleLeadership)
+    const acquired = await leader!.start(async (message) => {
       if (active) await deliver(await approvalManager.onMessage(message, () => active))
     })
-    if (leaderActive && eventRouter) {
-      eventDrainTimer = timers.setInterval(() => void drainRemoteEvents(), 250)
-      unrefTimer(eventDrainTimer)
-    }
-    if (leaderActive) scheduleReconcile()
+    if (acquired && !coordinated) handleLeadership(true)
     return true
+  }
+
+  function handleLeadership(value: boolean): void {
+    // Leader 切换时同步启动或停止远程事件 drain 与权限对账。
+    leaderActive = value
+    if (!value) {
+      stopEventDrain()
+      return
+    }
+    startEventDrain()
+    scheduleReconcile()
+  }
+
+  function startEventDrain(): void {
+    // 只有 Leader 消费共享事件，定时器不应重复创建。
+    if (!eventRouter || eventDrainTimer !== null) return
+    eventDrainTimer = timers.setInterval(() => void drainRemoteEvents(), 250)
+    unrefTimer(eventDrainTimer)
+  }
+
+  function stopEventDrain(): void {
+    // 失去 Leader 身份后立即停止消费其他实例事件。
+    if (eventDrainTimer === null) return
+    timers.clearInterval(eventDrainTimer)
+    eventDrainTimer = null
+  }
+
+  function startInstanceHeartbeat(): void {
+    // 所有原生实例持续刷新注册心跳，便于接管前清理幽灵记录。
+    if (!dependencies.instanceRegistry || !dependencies.instanceID) return
+    instanceHeartbeatTimer = timers.setInterval(
+      () => heartbeatInstance(),
+      RuntimeTiming.InstanceHeartbeatMs,
+    )
+    unrefTimer(instanceHeartbeatTimer)
+  }
+
+  function heartbeatInstance(): void {
+    // 注册锁短暂冲突只记录诊断，不中断插件 hooks。
+    try {
+      dependencies.instanceRegistry?.heartbeat(dependencies.instanceID!)
+    } catch (error) {
+      console.error(`[wechat] 实例心跳失败: ${firstLine(error)}`)
+    }
   }
 
   function scheduleReconcile(): void {
@@ -289,11 +344,15 @@ export const WeChatPlugin: Plugin = async (input) => {
   const internalSessions = new InternalSessionRegistry()
 
   const gateway = new WeChatGateway(store, new IlinkClientTransport(store))
+  const supervisor = new TransportHealthSupervisor({ store, gateway })
   const leader = new GatewayLeader({
     gateway,
     mailbox,
     lease,
     ownerInstanceID: instance.instanceID,
+    supervisor,
+    shouldNotifyStop: () =>
+      instances.prune().every((item) => item.instanceID === instance.instanceID),
   })
   const approvalModel = config.model
     ? new OpenCodeApprovalModel({
