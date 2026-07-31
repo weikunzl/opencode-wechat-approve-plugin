@@ -3,6 +3,11 @@ import os from "node:os"
 import path from "node:path"
 import { loadPluginConfig, type PluginConfig } from "./config.js"
 import type { ApprovalConversation, NotificationEnvelope, PendingApproval, SessionRunState, WeChatContext } from "./domain.js"
+import {
+  defaultTransportHealth,
+  isTransportHealthState,
+  type TransportHealthState,
+} from "./transport-health.js"
 import type { AccountData } from "./types.js"
 
 export const WECHAT_DATA_DIR_NAME = "wechat-approve"
@@ -172,6 +177,20 @@ export class WeChatStore {
       "notification-outbox.json",
       this.loadOutbox().filter((item) => item.id !== id),
     )
+  }
+
+  loadTransportHealth(): TransportHealthState {
+    // transport 健康与绑定分开读取，文件缺失时不能声称微信在线。
+    return this.readJSON(
+      "transport-health-v1.json",
+      defaultTransportHealth(),
+      isTransportHealthState,
+    )
+  }
+
+  saveTransportHealth(state: TransportHealthState): void {
+    // 健康文件只包含枚举、计数和时间，不得写入凭据。
+    this.atomicWrite("transport-health-v1.json", state)
   }
 
   migrateLegacyState(): void {
