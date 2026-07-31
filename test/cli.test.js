@@ -144,6 +144,32 @@ test("doctor requires bind after an expired WeChat session", async () => {
   assert.match(result.transport.detail, /needs rebind.*wechat-approve bind/)
 })
 
+test("doctor reports redacted degraded transport recovery details", async () => {
+  const state = doctorFixture()
+  const store = new WeChatStore(state.stateDirectory)
+  store.enqueueNotification({
+    id: "health-test",
+    kind: "warning",
+    text: "redacted",
+    createdAt: 1_000,
+  })
+  store.saveTransportHealth({
+    ...defaultTransportHealth(),
+    status: TransportHealthStatus.Degraded,
+    lastFailureKind: TransportFailureKind.Network,
+    nextRetryAt: 2_000,
+    cleanShutdown: false,
+  })
+
+  const result = await doctorInstallation(state.options)
+
+  assert.equal(result.transport.ok, false)
+  assert.equal(
+    result.transport.detail,
+    "degraded failure=network outbox=1 nextRetryAt=1970-01-01T00:00:02.000Z",
+  )
+})
+
 function doctorFixture() {
   const root = mkdtempSync(join(tmpdir(), "wechat-doctor-health-"))
   const configFile = join(root, "opencode.jsonc")

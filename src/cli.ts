@@ -127,6 +127,14 @@ function readTransportCheck(store: WeChatStore): Check {
   if (health.status === TransportHealthStatus.NeedsRebind) {
     return { ok: false, detail: "needs rebind; run wechat-approve bind" }
   }
+  if (health.status === TransportHealthStatus.Degraded) {
+    const failure = health.lastFailureKind ?? "unknown"
+    const outbox = store.loadOutbox().length
+    return {
+      ok: false,
+      detail: `degraded failure=${failure} outbox=${outbox} nextRetryAt=${formatTimestamp(health.nextRetryAt)}`,
+    }
+  }
   if (health.lastSuccessAt === null) {
     return { ok: false, detail: "unknown: no successful transport probe" }
   }

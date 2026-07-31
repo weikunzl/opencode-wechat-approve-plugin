@@ -15,7 +15,7 @@
 - Keep source methods at 20 lines or fewer, use Chinese boundary comments, named operation objects for more than three parameters, and enums instead of magic status values.
 - Production behavior follows strict red-green-refactor TDD.
 - Preserve the user's uncommitted `AGENTS.md`.
-- Release as `1.2.0` only after automated verification and affected registry REAL acceptance.
+- Release as the user-selected `1.1.3` only after automated verification and affected registry REAL acceptance.
 
 ---
 
@@ -158,7 +158,7 @@ git commit -m "feat(runtime): restore gateway leadership automatically"
 - Modify: `src/cli.ts`
 - Modify: `README.md`
 - Modify: `docs/acceptance.md`
-- Create: `docs/release-impact-1.2.0.md`
+- Create: `docs/release-impact-1.1.3.md`
 - Modify: `package.json`
 - Modify: `package-lock.json`
 - Test: `test/cli.test.js`
@@ -180,7 +180,7 @@ Expected: FAIL because `DoctorResult` has no transport check.
 
 - [ ] **Step 3: Implement doctor output and documentation**
 
-Read the redacted health state, return actionable details, document behavior, add the release impact matrix, and set package/lockfile version to `1.2.0`.
+Read the redacted health state, return actionable details, document behavior, add the release impact matrix, and set package/lockfile version to `1.1.3`.
 
 - [ ] **Step 4: Run complete automated verification**
 
@@ -199,7 +199,7 @@ Expected: all commands exit zero.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/cli.ts test/cli.test.js README.md docs/acceptance.md docs/release-impact-1.2.0.md package.json package-lock.json
+git add src/cli.ts test/cli.test.js README.md docs/acceptance.md docs/release-impact-1.1.3.md package.json package-lock.json
 git commit -m "feat(cli): report WeChat transport health"
 ```
 
@@ -208,11 +208,11 @@ git commit -m "feat(cli): report WeChat transport health"
 ### Task 5: Registry Candidate and Real Acceptance
 
 **Files:**
-- Modify after evidence: `docs/release-impact-1.2.0.md`
+- Modify after evidence: `docs/release-impact-1.1.3.md`
 - Modify after evidence: `docs/acceptance.md`
 
 **Interfaces:**
-- Prerelease `1.2.0-rc.0` is published with dist-tag `next`.
+- Prerelease `1.1.3-rc.0` is published with dist-tag `next`.
 - REAL evidence records startup, degraded/rebind recovery, outbox replay, and final shutdown.
 
 - [ ] **Step 1: Inspect package contents**
@@ -226,7 +226,7 @@ Expected: source state, local binding files, credentials, coverage, and worktree
 Run:
 
 ```bash
-npm version 1.2.0-rc.0 --no-git-tag-version
+npm version 1.1.3-rc.0 --no-git-tag-version
 npm publish --access public --tag next
 ```
 
@@ -236,9 +236,9 @@ User completes npm 2FA without sharing credentials.
 
 Install the registry candidate in an isolated OpenCode configuration and record REAL-00, REAL-16, and REAL-17 using the repository evidence schema. Startup and shutdown messages must be visible in the confirmed WeChat conversation.
 
-- [ ] **Step 4: Publish formal 1.2.0**
+- [ ] **Step 4: Publish formal 1.1.3**
 
-Restore package/lockfile to `1.2.0`, run full verification again, publish with `latest`, verify `npm view`, then tag and push `v1.2.0`.
+Restore package/lockfile to `1.1.3`, run full verification again, publish with `latest`, verify `npm view`, then tag and push `v1.1.3`.
 
 - [ ] **Step 5: Merge and push**
 
