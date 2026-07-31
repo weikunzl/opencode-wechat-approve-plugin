@@ -1,70 +1,47 @@
 # Repository Guidelines
 
-## 项目结构与职责
+`AGENTS.md` 只保存 AI 编程助手执行任务所需的核心构建命令、项目目录结构、行为约束和测试策略。其他类别的内容必须先获得用户明确同意；必要的长篇说明放入 `docs/`，本文件仅保留入口链接。
 
-- `src/`：TypeScript 源码。入口为 `src/index.ts`，CLI 位于 `src/bin.ts` 和 `src/cli.ts`；审批、微信网关、状态存储等逻辑按 kebab-case 文件拆分。
-- `test/`：Node.js 测试，文件与源码模块对应，如 `src/store.ts` 对应 `test/store.test.js`。
-- `docs/`：架构设计、实施计划与验收记录。新增行为前先查阅相关文档，必要时同步更新。
-- `dist/`：`tsc` 生成的构建产物，已被 Git 忽略；禁止手工编辑。
-- `README.md`：面向用户的安装和使用手册，不用于记录 AI 工作过程。
+## 项目目录结构
 
-## OpenCode 插件架构约束
+- `src/`：TypeScript 源码。插件入口为 `src/index.ts`，CLI 位于 `src/bin.ts` 和 `src/cli.ts`，其余模块按 kebab-case 拆分。
+- `test/`：基于 `node:test` 的自动化测试，与源码模块对应；测试从 `dist/` 导入。
+- `scripts/`：端到端测试、真实验收和开发辅助脚本。
+- `docs/`：架构设计、实施计划、测试方案、发布影响和验收记录。新增或改变行为前先查阅相关文档。
+- `dist/`：`tsc` 生成且被 Git 忽略的构建产物，禁止手工编辑。
+- `README.md`：面向用户的安装与使用手册，不记录 AI 工作过程。
 
-- 严格遵循 [OpenCode Plugins 官方文档](https://opencode.ai/docs/plugins/)：包入口导出 `@opencode-ai/plugin` 的 `Plugin` 函数，使用 OpenCode 注入的 `project`、`directory`、`worktree`、`client` 和 `$` 上下文，并返回官方 hooks。
-- 插件必须运行在 OpenCode 插件生命周期内；通知、审批和会话状态通过 `event`、`permission.asked`、`permission.replied` 等官方 hooks 接收，优先使用注入的 SDK `client` 与 OpenCode 交互。
-- 禁止把插件设计成或依赖一个独立的 OpenCode Server：不得由插件启动、管理或要求用户常驻运行额外的 `opencode serve`、`opencode web`、HTTP 监听端口或中心服务，也不得以固定端口和 `attach` 拓扑作为插件正常工作的前提。
-- 微信长轮询属于插件内部的外部 API 客户端任务，可以随插件初始化并在释放时停止；不得为此暴露本地监听端口。需要访问尚未被 SDK 覆盖的 OpenCode 接口时，只能使用当前插件上下文提供的 `serverUrl`，禁止硬编码地址或创建第二个服务。
-- npm 发布包应由 OpenCode 按配置中的包规格自动安装和加载；开发期本地入口只能用于调试，用户手册和安装器不得将 `file://` 托管副本作为正式架构。
+## 核心构建命令
 
-## 构建、测试与开发命令
-
-- `npm ci`：按 lockfile 安装依赖，适用于全新环境和 CI。
+- `npm ci`：按照 lockfile 安装依赖。
 - `npm run dev`：以 watch 模式编译 TypeScript。
 - `npm run build`：清理 `dist/` 后执行严格 TypeScript 编译并生成声明文件。
-- `npm test`：先构建，再运行全部 `node:test` 测试。
+- `npm test`：先构建，再运行全部自动化测试。
+- `npm run test:e2e`：运行不依赖真实微信的端到端 smoke。
+- `npm run test:e2e:live`：启动真实微信人工验收记录流程；它不能替代真实场景证据。
 
-项目要求 Node.js 20 或更高版本。提交前至少运行与改动相关的测试；涉及公共接口、跨模块行为或发布内容时运行完整 `npm test` 和 `npm run build`。
+项目要求 Node.js 20 或更高版本。
 
-## 编码风格与命名
+## 行为约束
 
-遵循现有 TypeScript 风格：两空格缩进、双引号、无分号、尾随逗号。保持 ESM，并在相对导入中使用 `.js` 后缀。文件使用 kebab-case，类、接口和类型使用 PascalCase，函数和变量使用 camelCase。优先使用明确类型和小型单一职责模块；不要用 `any` 绕过 `strict`。仓库未配置独立 lint 或格式化工具，应以现有相邻代码为准。
+- 严格遵循 [OpenCode Plugins 官方文档](https://opencode.ai/docs/plugins/)：包入口导出 `Plugin` 函数，使用 OpenCode 注入的上下文并返回官方 hooks。
+- 插件只运行在 OpenCode 插件生命周期内。禁止启动、管理或要求额外常驻的 `opencode serve`、`opencode web`、HTTP 监听端口或中心服务；未被 SDK 覆盖的接口只能使用当前上下文的 `serverUrl`。
+- 微信长轮询可以随插件初始化和释放，但不得暴露本地监听端口。正式安装必须使用 OpenCode 配置中的 npm 包规格，不得以 `file://` 副本作为发布架构。
+- 保持严格 TypeScript、ESM、两空格缩进、双引号、无分号和相对导入 `.js` 后缀。文件使用 kebab-case，类型使用 PascalCase，函数和变量使用 camelCase；禁止以 `any` 绕过 `strict`。
+- 新增源码、脚本和工具优先使用 TypeScript。单个方法不超过 20 行；参数超过 3 个时使用具名操作对象；禁止魔法值；方法内用简洁中文注释说明关键业务意图或边界。
+- 不得提交或输出 token、context token、绑定信息和本地状态。只接受已绑定用户的一对一消息，模糊表达绝不授权；模型输出必须校验请求 ID、结构、置信度和授权范围，并保持文件权限、租约、幂等性及跨平台安全边界。
+- 修改前阅读相关源码、测试和 `docs/`；仅改任务所需文件，保留用户已有改动，不做无关重构，不扩大授权范围或引入通用聊天能力。
+- 提交遵循 Conventional Commits；版本遵循 SemVer，Git tag 使用 `vX.Y.Z`。涉及发布时先查阅 [`docs/`](docs/) 中对应的 `release-impact-*` 和验收文档。
+- 完成前检查 `git diff`，执行与改动层级和风险相称的验证，并说明改动文件、测试结果及未验证风险。
 
-实现时还必须遵守以下约束：
+## 分层测试策略
 
-- 新增源码、脚本和工具代码时应优先使用 TypeScript，凡可用 TypeScript 实现的场景尽量避免新增 JavaScript；仅在运行环境、工具链或既有测试框架明确要求时使用 JavaScript。
-- 单个方法（函数）不得超过 20 行；复杂逻辑应拆分为职责清晰的私有方法。
-- 禁止使用魔法值；优先复用已有枚举，没有合适枚举时先定义语义明确的枚举。
-- 每个方法内部都要添加简洁、准确的中文注释，说明关键业务意图或边界处理，避免重复解释语法。
-- 方法参数超过 3 个时，必须封装为具名的操作对象（如参数接口或类型）。
+测试按阶段逐层推进；低层测试不能替代高层测试，高层测试也不应塞入每次 TDD 的红绿循环。
 
-## 测试规范
+1. **Plan 实现阶段 — TDD**：TDD 用于执行 plan 中的实现任务，而不是编写 plan。每个行为变更或缺陷修复先添加能失败的测试，再做最小实现使其通过，最后重构；循环内优先运行对应的单元或模块测试。
+2. **功能完成阶段 — 集成与自动化 E2E**：一个完整功能实现后，再验证跨模块协议、状态恢复、进程边界和相关 smoke/E2E 场景。公共接口或跨模块行为变化至少运行完整 `npm test` 和 `npm run build`。
+3. **发布候选阶段 — 真实验收**：根据变更影响识别 REAL 场景，并使用待发布的 registry 包在真实微信中执行。详细分层、场景矩阵和人工证据规则见 [`docs/acceptance.md`](docs/acceptance.md)、[`docs/e2e-test-plan.md`](docs/e2e-test-plan.md)、[`docs/approval-security-matrix.md`](docs/approval-security-matrix.md) 和 [`docs/manual-live-acceptance.md`](docs/manual-live-acceptance.md)。
 
-使用 `node:test` 与 `node:assert/strict`。测试从 `dist/` 导入，因此不要跳过构建。测试文件命名为 `test/<module>.test.js`，测试名称应描述可观察行为。修复缺陷或改变行为时必须增加回归测试，并覆盖成功、拒绝、超时、重启或重复消息等相关边界。
-
-## 安全与配置
-
-不得提交或输出 bot token、context token、绑定信息及本地状态文件。保持现有安全边界：默认仅监听回环地址，只接受已绑定用户的一对一消息，模糊表达绝不授权，模型输出必须经过请求 ID、结构、置信度和授权范围校验。涉及文件权限、凭据脱敏、租约或幂等性的改动必须保留跨平台行为。
-
-## 提交与 Pull Request
-
-提交必须遵循 [Conventional Commits 1.0.0](https://www.conventionalcommits.org/en/v1.0.0/)：使用 `<type>[optional scope]: <description>` 格式，例如 `feat(approval): support batch decisions`、`fix(store): recover stale lease`、`docs: clarify binding flow`。新增功能使用 `feat`，缺陷修复使用 `fix`；不兼容变更在类型后加 `!` 或使用 `BREAKING CHANGE:` footer。一次提交聚焦一个逻辑变更。PR 应说明行为变化、安全影响、验证命令和关联 issue；微信消息或 CLI 输出变化应附前后示例。避免无关重构，并确认 Linux、macOS、Windows CI 场景未被破坏。
-
-版本发布遵循 [Semantic Versioning 2.0.0](https://semver.org/) 的 `vX.Y.Z` 规则：`MAJOR` 用于不兼容的公开 API 变更，`MINOR` 用于向后兼容的新功能，`PATCH` 用于向后兼容的缺陷修复。例如发布 `v1.4.2` 后，兼容功能发布为 `v1.5.0`，修复发布为 `v1.4.3`，破坏性变更发布为 `v2.0.0`。Git tag 使用前缀 `v`，`package.json` 的 `version` 字段使用不带前缀的 `X.Y.Z`。
-
-较大的功能变更最好同时包含：`docs/` 中描述需求与边界的文档、实现代码，以及覆盖核心行为和边界条件的自动化测试用例。文档、代码和测试应在同一个 PR 中保持一致，不能只提交其中一部分。
-
-## 发布前真实验收门禁
-
-- 发版前必须根据代码、配置、依赖和用户可见行为识别受影响的 REAL 场景，并在发布影响文档中列出映射。
-- 受影响场景必须使用待发布的 registry 包在真实微信中重跑；用户可明确选择执行 REAL-00～REAL-18 全量真实回归。
-- REAL-00 必须先通过：严格标题 `PASS` 使用屏幕证据；人工模式完整结构化文字证据可标记 `status=PASS`、`evidenceMode=MANUAL_REPORTED`，不得伪装成屏幕证据。
-- 任一真实线程场景为 `BLOCKED` 或 `UNVERIFIED` 时，不得将其标记为通过，也不得以该状态发布；人工模式缺少任一必填文字字段或不符合预期时不得通过。
-- 文字证据和报告不得包含 token、context token、二维码、绑定信息、用户 ID 或其他聊天内容；严格屏幕证据仍须遵守同样的脱敏边界。
-- 用户明确选择人工协作模式时，每条场景开始前必须在真实线程文字确认目标会话和绑定身份，并记录原始窗口标题、用户确认和操作者时间；`MANUAL_CONFIRMED` 仅表示身份确认，不能单独通过。
-- REAL-00 必须由主流程先创建无副作用通知，主线程须校验 scenarioID、registry 版本、原始标题、`MANUAL_CONFIRMED`、用户确认、微信原文、脱敏 requestID=decision、pending/outbox 前后、预期结果、清理结果和操作者时间，完整且符合预期后才能以 `status=PASS`、`evidenceMode=MANUAL_REPORTED` 推进 REAL-01～REAL-18。
-
-## AI 编码代理要求
-
-修改前阅读相关源码、测试和 `docs/` 设计；优先复用现有抽象，不扩大授权范围或引入通用聊天能力。仅修改任务所需文件，保留用户已有改动。完成后检查 `git diff`，运行适当验证，并在交付说明中列出改动文件、测试结果及未验证风险。
+自动化测试使用 `node:test` 与 `node:assert/strict`，测试文件命名为 `test/<module>.test.js`。由于测试从 `dist/` 导入，不得跳过构建。测试名称描述可观察行为；回归测试覆盖与改动相关的成功、拒绝、超时、重启和重复消息边界。真实场景为 `BLOCKED` 或 `UNVERIFIED` 时不得标记为通过或据此发布。
 
 每次任务完成时，最终回复必须以“我的至尊无上主人，任务已完成。”作为结尾。
