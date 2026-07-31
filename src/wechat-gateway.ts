@@ -13,10 +13,18 @@ export interface InboundApprovalMessage {
   receivedAt: number
 }
 
+export interface SendTextInput {
+  to: string
+  text: string
+  contextToken: string
+  idempotencyKey: string
+  signal?: AbortSignal
+}
+
 export interface IlinkTransport {
   login(onQRCode?: (value: string) => void, force?: boolean): Promise<AccountData>
   poll(cursor: string, signal?: AbortSignal): Promise<GetUpdatesResponse>
-  sendText(to: string, text: string, contextToken: string, idempotencyKey: string): Promise<void>
+  sendText(input: SendTextInput): Promise<void>
 }
 
 export class WeChatGateway {
@@ -26,6 +34,7 @@ export class WeChatGateway {
   private retryContextGeneration: string | null = null
   private seen: Set<string>
   private inboundRecorder: ((message: InboundApprovalMessage) => Promise<void>) | null = null
+  private transportErrorHandler: ((error: unknown) => void) | null = null
 
   constructor(
     private readonly store: WeChatStore,
@@ -92,6 +101,11 @@ export class WeChatGateway {
     this.inboundRecorder = recorder
   }
 
+  setTransportErrorHandler(handler: ((error: unknown) => void) | null): void {
+    // 运行时错误只回传类型对象，健康监督器负责持久化受控摘要。
+    this.transportErrorHandler = handler
+  }
+
   async stop(): Promise<void> {
     this.running = false
     this.pollController?.abort()
@@ -113,6 +127,7 @@ export class WeChatGateway {
       if (signal?.aborted) return
       const diagnostic = formatTransportError(error, this.store)
       this.handleTransportError(error)
+      this.transportErrorHandler?.(error)
       throw new Error(diagnostic, { cause: error })
     }
     if (signal?.aborted) return
@@ -160,34 +175,43 @@ export class WeChatGateway {
     }
   }
 
-  async send(notification: NotificationEnvelope): Promise<void> {
+  async send(
+    notification: NotificationEnvelope,
+    signal?: AbortSignal,
+    reportFailure = true,
+  ): Promise<void> {
     // 业务通知先持久化，只有 transport 成功后才确认出队。
     const safeNotification = this.sanitize(notification)
     this.store.enqueueNotification(safeNotification)
-    await this.deliver(safeNotification)
+    await this.deliver(safeNotification, { signal, reportFailure })
     this.store.ackNotification(safeNotification.id)
   }
 
-  async probe(notification: NotificationEnvelope): Promise<void> {
+  async probe(notification: NotificationEnvelope, signal?: AbortSignal): Promise<void> {
     // 健康探测不进入业务 outbox，避免恢复后发送过期的启动消息。
-    await this.deliver(this.sanitize(notification))
+    await this.deliver(this.sanitize(notification), { signal, reportFailure: false })
   }
 
-  private async deliver(notification: NotificationEnvelope): Promise<void> {
+  private async deliver(
+    notification: NotificationEnvelope,
+    options: { signal?: AbortSignal; reportFailure: boolean },
+  ): Promise<void> {
     // 每次发送都读取最新绑定，使外部 bind 无需重启 transport。
     const context = this.store.loadContext()
     if (!context) throw new Error("微信尚未绑定，缺少通知上下文")
     try {
-      await this.transport.sendText(
-        context.boundUserID,
-        notification.text,
-        context.contextToken,
-        notification.id,
-      )
+      await this.transport.sendText({
+        to: context.boundUserID,
+        text: notification.text,
+        contextToken: context.contextToken,
+        idempotencyKey: notification.id,
+        ...(options.signal ? { signal: options.signal } : {}),
+      })
     } catch (error) {
       const diagnostic = formatTransportError(error, this.store)
       if (requiresContextRefresh(error)) this.retryContextGeneration = bindingGeneration(this.store)
       this.handleTransportError(error)
+      if (options.reportFailure) this.transportErrorHandler?.(error)
       throw new Error(diagnostic, { cause: error })
     }
   }
@@ -197,10 +221,10 @@ export class WeChatGateway {
     return { ...notification, text: sanitizeNotificationText(notification.text) }
   }
 
-  async flushOutbox(): Promise<void> {
+  async flushOutbox(signal?: AbortSignal, reportFailure = true): Promise<void> {
     if (!this.store.loadContext()) return
     for (const notification of this.store.loadOutbox()) {
-      await this.send(notification)
+      await this.send(notification, signal, reportFailure)
     }
   }
 
@@ -229,6 +253,7 @@ export class WeChatGateway {
     if (!isSessionTimeoutError(error)) return
     this.store.invalidateContext()
     this.running = false
+    this.pollController?.abort()
   }
 
   private canFlushOutbox(): boolean {

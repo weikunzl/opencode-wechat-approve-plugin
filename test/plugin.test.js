@@ -379,3 +379,42 @@ test("drops a notification completed after the runtime lease is lost", async () 
 
   assert.deepEqual(gateway.sent, [])
 })
+
+test("continues shutdown when plugin instance disposal is temporarily busy", async () => {
+  let stopped = 0
+  const runtime = createPluginRuntime({
+    gateway: createGateway(),
+    approvalManager: {
+      reconcile: async () => [],
+      onPermissionAsked: async () => [],
+      onPermissionReplied: async () => {},
+      onMessage: async () => [],
+    },
+    sessionNotifier: { handle: async () => [] },
+    leader: {
+      start: async () => true,
+      stop: async () => {
+        stopped += 1
+      },
+    },
+    instanceRegistry: {
+      heartbeat: () => {},
+      dispose: () => {
+        throw new Error("registry busy")
+      },
+    },
+    instanceID: "instance",
+  })
+  const originalError = console.error
+  console.error = () => {}
+  try {
+    await runtime.start()
+    await assert.doesNotReject(
+      runtime.hooks.event({ event: { type: "global.disposed", properties: {} } }),
+    )
+  } finally {
+    console.error = originalError
+  }
+
+  assert.equal(stopped, 1)
+})

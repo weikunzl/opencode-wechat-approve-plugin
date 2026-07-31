@@ -21,7 +21,8 @@ outbox 阻断长轮询；非 Leader 会重试租约接管；上下文过期后�
 
 ## 真实微信门禁
 
-正式发布前先发布 `1.1.3-rc.0` 到 `next`，从 npm registry 安装候选包并执行：
+正式发布前先把 `1.1.3` 发布到 `next`（不要直接使用 `latest`），从 npm registry
+安装该精确版本并执行：
 
 - REAL-00：OpenCode 加载候选包，启动探测原文可见，`doctor` transport 为 healthy。
 - REAL-16：模拟/观察失效 context，确认不无限重试旧 context；重新扫码绑定后，
@@ -30,4 +31,6 @@ outbox 阻断长轮询；非 Leader 会重试租约接管；上下文过期后�
   全部关闭期间没有继续监控或发送。
 
 每项记录版本来源、微信原文、pending/outbox 前后和清理结果。任一场景
-`FAIL`、`BLOCKED` 或 `UNVERIFIED` 时不得发布正式 `latest`。
+`FAIL`、`BLOCKED` 或 `UNVERIFIED` 时不得提升为 `latest`。全部通过后使用
+`npm dist-tag add @wekux/opencode-wechat-approve-plugin@1.1.3 latest` 完成正式发布，
+无需重复发布同一版本。

@@ -68,3 +68,18 @@ test("binding generation digest never contains account or context values", () =>
   assert.match(digest, /^[a-f0-9]{64}$/)
   assert.doesNotMatch(digest, /bot-secret|ilink|context-secret/)
 })
+
+test("quarantines unsafe transport health numbers and digests", () => {
+  const invalidStates = [
+    { ...defaultTransportHealth(), lastSuccessAt: Number.MAX_VALUE },
+    { ...defaultTransportHealth(), consecutiveFailures: -1 },
+    { ...defaultTransportHealth(), consecutiveFailures: 1.5 },
+    { ...defaultTransportHealth(), bindingGenerationDigest: "not-a-digest" },
+  ]
+
+  for (const state of invalidStates) {
+    const root = mkdtempSync(join(tmpdir(), "wechat-health-invalid-"))
+    writeFileSync(join(root, "transport-health-v1.json"), JSON.stringify(state))
+    assert.deepEqual(new WeChatStore(root).loadTransportHealth(), defaultTransportHealth())
+  }
+})

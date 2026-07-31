@@ -67,9 +67,33 @@ test("prunes dead and expired plugin instances before reporting active state", (
   const registry = new PluginInstanceRegistry(root, {
     now: () => 100,
     processAlive: (pid) => pid !== 11,
+    processFingerprint: (pid) => `test:${pid}`,
     staleAfterMs: 50,
   })
 
   assert.deepEqual(registry.prune().map((item) => item.instanceID), ["live"])
   assert.deepEqual(registry.list().map((item) => item.instanceID), ["live"])
+})
+
+test("prunes a reused pid with a different process fingerprint", () => {
+  const root = mkdtempSync(join(tmpdir(), "wechat-plugin-instance-pid-reuse-"))
+  writeFileSync(
+    join(root, "plugin-instances-v1.json"),
+    JSON.stringify([{
+      instanceID: "old-process",
+      pid: 10,
+      processFingerprint: "start:old",
+      projectDirectory: "/old",
+      sessionIDs: [],
+      heartbeatAt: 100,
+      status: "active",
+    }]),
+  )
+  const registry = new PluginInstanceRegistry(root, {
+    now: () => 100,
+    processAlive: () => true,
+    processFingerprint: () => "start:new",
+  })
+
+  assert.deepEqual(registry.prune(), [])
 })

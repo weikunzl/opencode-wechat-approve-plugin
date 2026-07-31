@@ -20,15 +20,22 @@ enum HealthTiming {
 
 enum HealthMessage {
   Restarted = "🔄 [OpenCode] 微信授权插件已重新连接",
+  Takeover = "🔄 [OpenCode] 微信授权网关已切换并恢复连接",
   Stopped = "⏹️ [OpenCode] 微信授权插件已停止",
+}
+
+export enum TransportStartReason {
+  Restart = "restart",
+  Takeover = "takeover",
 }
 
 interface HealthGateway {
   initialize(): Promise<"ready" | "needs-binding">
   start(onMessage: (message: InboundApprovalMessage) => Promise<void>): void
   stop(): Promise<void>
-  probe(notification: NotificationEnvelope): Promise<void>
-  flushOutbox(): Promise<void>
+  setTransportErrorHandler?(handler: ((error: unknown) => void) | null): void
+  probe(notification: NotificationEnvelope, signal?: AbortSignal): Promise<void>
+  flushOutbox(signal?: AbortSignal, reportFailure?: boolean): Promise<void>
 }
 
 interface TransportHealthSupervisorOptions {
@@ -49,6 +56,7 @@ interface SupervisorTimers {
 export interface TransportStopOptions {
   sendNotice: boolean
   cleanShutdown?: boolean
+  preserveHealth?: boolean
 }
 
 export class TransportHealthSupervisor {
@@ -57,7 +65,10 @@ export class TransportHealthSupervisor {
   private readonly shutdownTimeoutMs: number
   private monitor: unknown = null
   private running = false
-  private recovering = false
+  private lifecycle = 0
+  private recovery: Promise<void> | null = null
+  private operationController: AbortController | null = null
+  private startReason = TransportStartReason.Restart
   private onMessage: ((message: InboundApprovalMessage) => Promise<void>) | null = null
 
   constructor(private readonly options: TransportHealthSupervisorOptions) {
@@ -67,66 +78,101 @@ export class TransportHealthSupervisor {
     this.shutdownTimeoutMs = options.shutdownTimeoutMs ?? HealthTiming.ShutdownTimeoutMs
   }
 
-  async start(onMessage: (message: InboundApprovalMessage) => Promise<void>): Promise<void> {
+  async start(
+    onMessage: (message: InboundApprovalMessage) => Promise<void>,
+    reason = TransportStartReason.Restart,
+  ): Promise<void> {
     // 先保留上次状态用于判断，再标记本次启动尚未正常关闭。
     const previous = this.options.store.loadTransportHealth()
+    const lifecycle = ++this.lifecycle
     this.running = true
     this.onMessage = onMessage
+    this.startReason = reason
+    this.options.gateway.setTransportErrorHandler?.((error) => this.reportRuntimeFailure(error))
     this.markStarting(previous)
     this.startMonitor()
+    await this.initializeTransport(previous, lifecycle)
+  }
+
+  private async initializeTransport(
+    previous: TransportHealthState,
+    lifecycle: number,
+  ): Promise<void> {
+    // 初始化结果必须属于当前生命周期，停止后的迟到结果直接丢弃。
     if ((await this.options.gateway.initialize()) !== "ready") {
+      if (!this.isCurrent(lifecycle)) return
       this.markNeedsRebind()
       return
     }
-    this.options.gateway.start(onMessage)
-    if (this.shouldProbe(previous)) await this.probeAndReplay()
+    if (!this.isCurrent(lifecycle)) return
+    if (!this.onMessage) return
+    this.options.gateway.start(this.onMessage)
+    if (this.shouldProbe(previous)) await this.probeAndReplay(lifecycle)
     else this.markHealthy(previous)
   }
 
   async stop(options: TransportStopOptions): Promise<void> {
     // 停止监督器后不再接受恢复定时器，关闭通知只做有限等待。
     this.running = false
+    this.lifecycle += 1
+    this.operationController?.abort()
     this.stopMonitor()
+    await this.recovery?.catch(() => {})
     if (options.sendNotice && this.isHealthy()) await this.sendStopNotice()
+    this.options.gateway.setTransportErrorHandler?.(null)
     await this.options.gateway.stop()
-    this.markStopped(options.cleanShutdown ?? true)
+    if (!options.preserveHealth) this.markStopped(options.cleanShutdown ?? true)
   }
 
-  private async probeAndReplay(): Promise<void> {
+  private async probeAndReplay(lifecycle: number): Promise<void> {
     // 探测成功才恢复业务 outbox，任一失败都不能抛出到插件入口。
+    const controller = new AbortController()
+    this.operationController = controller
     try {
-      await this.options.gateway.probe(this.probeNotification())
+      await this.options.gateway.probe(this.probeNotification(), controller.signal)
+      if (!this.isCurrent(lifecycle)) return
       this.markProbeSuccess()
-      await this.options.gateway.flushOutbox()
+      await this.options.gateway.flushOutbox(controller.signal, false)
     } catch (error) {
+      if (controller.signal.aborted) return
       this.markFailure(error)
       if (isSessionTimeoutError(rootCause(error))) {
         this.options.store.invalidateContext()
         await this.options.gateway.stop()
       }
+    } finally {
+      if (this.operationController === controller) this.operationController = null
     }
   }
 
   private async recoverIfNeeded(): Promise<void> {
     // 绑定代次或退避到期时，在同一 Leader 内恢复 transport。
-    if (!this.running || this.recovering) return
+    if (!this.running || this.recovery) return
     const state = this.options.store.loadTransportHealth()
     const changed = state.bindingGenerationDigest !== this.bindingDigest()
-    if (!changed && !retryIsDue(state, this.now())) return
-    this.recovering = true
+    if (changed && state.status === TransportHealthStatus.Healthy) {
+      this.markBindingObserved(state)
+      return
+    }
+    if (!bindingRecoveryIsDue(state, changed) && !retryIsDue(state, this.now())) return
+    const lifecycle = this.lifecycle
+    const operation = this.recover(state, lifecycle)
+    this.recovery = operation
     try {
-      await this.recover(state)
+      await operation
     } finally {
-      this.recovering = false
+      if (this.recovery === operation) this.recovery = null
     }
   }
 
-  private async recover(state: TransportHealthState): Promise<void> {
+  private async recover(state: TransportHealthState, lifecycle: number): Promise<void> {
     // 只有完整新绑定才能重新启动长轮询并验证真实发送。
     if ((await this.options.gateway.initialize()) !== "ready") return
+    if (!this.isCurrent(lifecycle)) return
+    this.startReason = TransportStartReason.Restart
     this.markRecovering(state)
     if (this.onMessage) this.options.gateway.start(this.onMessage)
-    await this.probeAndReplay()
+    await this.probeAndReplay(lifecycle)
   }
 
   private shouldProbe(previous: TransportHealthState): boolean {
@@ -160,6 +206,14 @@ export class TransportHealthSupervisor {
       ...previous,
       status: TransportHealthStatus.Healthy,
       cleanShutdown: false,
+      bindingGenerationDigest: this.bindingDigest(),
+    })
+  }
+
+  private markBindingObserved(previous: TransportHealthState): void {
+    // 正常入站 context 轮换只同步摘要，不发送用户可见的重连探测。
+    this.options.store.saveTransportHealth({
+      ...previous,
       bindingGenerationDigest: this.bindingDigest(),
     })
   }
@@ -217,13 +271,21 @@ export class TransportHealthSupervisor {
     })
   }
 
+  private reportRuntimeFailure(error: unknown): void {
+    // 轮询和业务发送错误同步到健康状态，但不保存原始错误正文。
+    if (!this.running) return
+    this.markFailure(error)
+  }
+
   private probeNotification(): NotificationEnvelope {
     // 时间桶与绑定摘要组成稳定键，热重载和同轮重试不会重复提示。
     const bucket = Math.floor(this.now() / HealthTiming.ProbeCooldownMs)
     return {
       id: `transport-health:start:${this.bindingDigest()}:${bucket}`,
       kind: "warning",
-      text: HealthMessage.Restarted,
+      text: this.startReason === TransportStartReason.Takeover
+        ? HealthMessage.Takeover
+        : HealthMessage.Restarted,
       createdAt: this.now(),
     }
   }
@@ -254,10 +316,25 @@ export class TransportHealthSupervisor {
     // 低频监督绑定代次与退避状态，不创建 OpenCode 外部守护进程。
     if (this.monitor !== null) return
     this.monitor = this.timers.setInterval(
-      () => void this.recoverIfNeeded(),
+      () => this.runRecoveryCheck(),
       HealthTiming.MonitorIntervalMs,
     )
     unrefTimer(this.monitor)
+  }
+
+  private runRecoveryCheck(): void {
+    // 定时恢复异常不得形成未处理拒绝，下一轮仍可继续尝试。
+    void this.recoverIfNeeded().catch((error) => this.reportRecoveryFailure(error))
+  }
+
+  private reportRecoveryFailure(error: unknown): void {
+    // 状态文件异常也不得形成未处理拒绝，日志只保留固定文案与枚举。
+    try {
+      this.markFailure(error)
+    } catch {
+      console.error("[wechat] transport 恢复状态写入失败")
+    }
+    console.error(`[wechat] transport 恢复失败: ${classifyFailure(error)}`)
   }
 
   private stopMonitor(): void {
@@ -268,27 +345,18 @@ export class TransportHealthSupervisor {
   }
 
   private async sendStopNotice(): Promise<void> {
-    // 关闭通知失败或超时都不能阻塞 OpenCode 退出。
+    // 到达关闭上限时主动中止底层 fetch，防止交接后迟到发送。
+    const controller = new AbortController()
+    const timer = this.timers.setTimeout(
+      () => controller.abort(),
+      this.shutdownTimeoutMs,
+    )
     try {
-      await this.withTimeout(this.options.gateway.probe(this.stopNotification()))
-    } catch {}
-  }
-
-  private withTimeout(operation: Promise<void>): Promise<void> {
-    // 定时器可注入，测试无需等待真实的两秒关闭上限。
-    return new Promise((resolve, reject) => {
-      const timer = this.timers.setTimeout(resolve, this.shutdownTimeoutMs)
-      operation.then(
-        () => {
-          this.timers.clearTimeout(timer)
-          resolve()
-        },
-        (error) => {
-          this.timers.clearTimeout(timer)
-          reject(error)
-        },
-      )
-    })
+      await this.options.gateway.probe(this.stopNotification(), controller.signal)
+    } catch {
+    } finally {
+      this.timers.clearTimeout(timer)
+    }
   }
 
   private isHealthy(): boolean {
@@ -303,6 +371,11 @@ export class TransportHealthSupervisor {
       status: TransportHealthStatus.Stopped,
       cleanShutdown,
     })
+  }
+
+  private isCurrent(lifecycle: number): boolean {
+    // 每个异步边界都核对生命周期，停止后的旧恢复不得重新启动轮询。
+    return this.running && this.lifecycle === lifecycle
   }
 }
 
@@ -334,6 +407,14 @@ function retryIsDue(state: TransportHealthState, now: number): boolean {
   // 仅 degraded 状态按 nextRetryAt 主动重试，needs-rebind 必须等待新绑定。
   return state.status === TransportHealthStatus.Degraded &&
     state.nextRetryAt !== null && state.nextRetryAt <= now
+}
+
+function bindingRecoveryIsDue(state: TransportHealthState, changed: boolean): boolean {
+  // 绑定变化只唤醒异常状态，健康 context 轮换不会产生重连消息。
+  return changed && (
+    state.status === TransportHealthStatus.NeedsRebind ||
+    state.status === TransportHealthStatus.Degraded
+  )
 }
 
 function defaultTimers(): SupervisorTimers {

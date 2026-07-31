@@ -20,6 +20,12 @@ export enum TransportFailureKind {
   Unknown = "unknown",
 }
 
+enum HealthValueLimit {
+  MaximumTimestamp = 8_640_000_000_000_000,
+}
+
+const BINDING_DIGEST_PATTERN = /^[a-f0-9]{64}$/
+
 export interface TransportHealthState {
   schemaVersion: TransportHealthSchemaVersion
   status: TransportHealthStatus
@@ -72,22 +78,39 @@ export function isTransportHealthState(value: unknown): value is TransportHealth
   if (!isRecord(value)) return false
   return value.schemaVersion === TransportHealthSchemaVersion.V1 &&
     Object.values(TransportHealthStatus).includes(value.status as TransportHealthStatus) &&
-    nullableNumber(value.lastProbeAt) && nullableNumber(value.lastSuccessAt) &&
-    nullableNumber(value.lastFailureAt) && nullableNumber(value.nextRetryAt) &&
-    nullableFailure(value.lastFailureKind) && typeof value.consecutiveFailures === "number" &&
+    nullableTimestamp(value.lastProbeAt) && nullableTimestamp(value.lastSuccessAt) &&
+    nullableTimestamp(value.lastFailureAt) && nullableTimestamp(value.nextRetryAt) &&
+    nullableFailure(value.lastFailureKind) && nonnegativeInteger(value.consecutiveFailures) &&
     typeof value.cleanShutdown === "boolean" &&
-    (value.bindingGenerationDigest === null || typeof value.bindingGenerationDigest === "string")
+    validDigest(value.bindingGenerationDigest)
 }
 
-function nullableNumber(value: unknown): boolean {
-  // 时间字段允许尚未发生时使用 null。
-  return value === null || typeof value === "number"
+function nullableTimestamp(value: unknown): boolean {
+  // 时间字段只接受 Date 可安全格式化的非负整数。
+  return value === null || (
+    typeof value === "number" &&
+    Number.isInteger(value) &&
+    value >= 0 &&
+    value <= HealthValueLimit.MaximumTimestamp
+  )
 }
 
 function nullableFailure(value: unknown): boolean {
   // 失败类别必须来自受控枚举，防止原始错误文本落盘。
   return value === null ||
     Object.values(TransportFailureKind).includes(value as TransportFailureKind)
+}
+
+function nonnegativeInteger(value: unknown): boolean {
+  // 连续失败次数不接受负数、小数或无穷值。
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
+}
+
+function validDigest(value: unknown): boolean {
+  // 绑定摘要必须是 SHA-256 十六进制文本。
+  return value === null || (
+    typeof value === "string" && BINDING_DIGEST_PATTERN.test(value)
+  )
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

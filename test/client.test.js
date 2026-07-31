@@ -25,7 +25,12 @@ test("reports a DNS failure with actionable WeChat API guidance", async () => {
     throw new TypeError("fetch failed", { cause })
   })
 
-  await assert.rejects(transport.sendText("owner", "hello", "context", "network-1"), (error) => {
+  await assert.rejects(transport.sendText({
+    to: "owner",
+    text: "hello",
+    contextToken: "context",
+    idempotencyKey: "network-1",
+  }), (error) => {
     assert.equal(error.name, "IlinkNetworkError")
     assert.match(error.message, /无法解析微信 API 地址.*DNS 或代理/)
     assert.match(error.message, /code=ENOTFOUND.*endpoint=\/ilink\/bot\/sendmessage/)
@@ -67,7 +72,12 @@ test("rejects a successful HTTP response containing a failed WeChat ret code", a
   )
 
   await assert.rejects(
-    transport.sendText("owner", "hello", "expired", "notice-1"),
+    transport.sendText({
+      to: "owner",
+      text: "hello",
+      contextToken: "expired",
+      idempotencyKey: "notice-1",
+    }),
     (error) => {
       assert.ok(error instanceof IlinkApiError)
       assert.match(error.message, /ret=40001/)
@@ -91,13 +101,46 @@ test("detects session timeout from errcode when ret is zero", async () => {
     async () => Response.json({ ret: 0, errcode: IlinkErrorCode.SessionTimeout, errmsg: "session timeout" }),
   )
 
-  await assert.rejects(transport.sendText("owner", "hello", "expired", "notice-timeout"), (error) => {
+  await assert.rejects(transport.sendText({
+    to: "owner",
+    text: "hello",
+    contextToken: "expired",
+    idempotencyKey: "notice-timeout",
+  }), (error) => {
     assert.ok(error instanceof IlinkApiError)
     assert.equal(error.details.ret, 0)
     assert.equal(error.details.errcode, IlinkErrorCode.SessionTimeout)
     assert.equal(error.code, IlinkErrorCode.SessionTimeout)
     return true
   })
+})
+
+test("aborts an in-flight send when the caller cancels it", async () => {
+  const store = new WeChatStore(mkdtempSync(join(tmpdir(), "wechat-client-abort-")))
+  store.saveAccount({
+    accountId: "bot",
+    token: "secret",
+    baseUrl: "https://example.invalid",
+    userId: "owner",
+    savedAt: "2026-07-27T00:00:00.000Z",
+  })
+  const controller = new AbortController()
+  const transport = new IlinkClientTransport(store, async (_url, init) =>
+    new Promise((_resolve, reject) => {
+      init.signal.addEventListener("abort", () => reject(init.signal.reason))
+    }),
+  )
+  const sending = transport.sendText({
+    to: "owner",
+    text: "hello",
+    contextToken: "context",
+    idempotencyKey: "abort",
+    signal: controller.signal,
+  })
+
+  controller.abort()
+
+  await assert.rejects(sending)
 })
 
 test("sanitizes credentials embedded in an iLink error message", () => {
@@ -137,7 +180,12 @@ test("uses a newly committed binding without restarting the transport", async ()
     "cursor",
   )
 
-  await transport.sendText("owner", "hello", "context", "notice-2")
+  await transport.sendText({
+    to: "owner",
+    text: "hello",
+    contextToken: "context",
+    idempotencyKey: "notice-2",
+  })
 
   assert.deepEqual(requests, [
     {
@@ -176,7 +224,12 @@ test("uses a forced login account before its binding is committed", async () => 
   })
 
   await transport.login(undefined, true)
-  await transport.sendText("owner", "hello", "context", "notice-3")
+  await transport.sendText({
+    to: "owner",
+    text: "hello",
+    contextToken: "context",
+    idempotencyKey: "notice-3",
+  })
 
   assert.deepEqual(requests, [
     {

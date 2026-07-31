@@ -131,10 +131,21 @@ export function createPluginRuntime(dependencies: {
   let eventDrainTimer: unknown = null
   let instanceHeartbeatTimer: unknown = null
 
+  const disposeInstance = (): void => {
+    // 注册表锁冲突只影响诊断记录，绝不能阻断 transport 与租约清理。
+    if (!dependencies.instanceRegistry || !dependencies.instanceID) return
+    try {
+      dependencies.instanceRegistry.dispose(dependencies.instanceID)
+    } catch (error) {
+      console.error(`[wechat] 实例注销失败: ${firstLine(error)}`)
+    }
+  }
+
   const deactivate = (releaseLease: boolean): Promise<void> => {
     if (deactivation) return deactivation
     deactivation = (async () => {
       active = false
+      disposeInstance()
       if (startupTimer !== null) timers.clearTimeout(startupTimer)
       startupTimer = null
       if (expiryTimer !== null) timers.clearInterval(expiryTimer)
@@ -145,7 +156,6 @@ export function createPluginRuntime(dependencies: {
       eventDrainTimer = null
       if (instanceHeartbeatTimer !== null) timers.clearInterval(instanceHeartbeatTimer)
       instanceHeartbeatTimer = null
-      if (dependencies.instanceRegistry && dependencies.instanceID) dependencies.instanceRegistry.dispose(dependencies.instanceID)
       if (releaseLease) lease?.release()
     })()
     return deactivation

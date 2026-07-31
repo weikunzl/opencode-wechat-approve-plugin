@@ -1,5 +1,6 @@
 import crypto from "node:crypto"
 import path from "node:path"
+import { processFingerprint } from "./runtime-lease.js"
 import { acquireDirectoryLock, ensureSharedDirectory, readSharedJSON, writeSharedJSON } from "./shared-file.js"
 
 export enum InstanceStatus {
@@ -31,6 +32,7 @@ enum InstanceTiming {
 interface InstanceRegistryOptions {
   now?: () => number
   processAlive?: (pid: number) => boolean
+  processFingerprint?: (pid: number) => string | null
   staleAfterMs?: number
 }
 
@@ -39,6 +41,7 @@ export class PluginInstanceRegistry {
   private readonly lock: string
   private readonly now: () => number
   private readonly processAlive: (pid: number) => boolean
+  private readonly processFingerprint: (pid: number) => string | null
   private readonly staleAfterMs: number
 
   constructor(private readonly directory: string, options: InstanceRegistryOptions = {}) {
@@ -48,6 +51,7 @@ export class PluginInstanceRegistry {
     this.lock = path.join(directory, LOCK_DIRECTORY)
     this.now = options.now ?? Date.now
     this.processAlive = options.processAlive ?? isProcessAlive
+    this.processFingerprint = options.processFingerprint ?? processFingerprint
     this.staleAfterMs = options.staleAfterMs ?? InstanceTiming.StaleAfterMs
   }
 
@@ -89,7 +93,7 @@ export class PluginInstanceRegistry {
     return {
       instanceID: crypto.randomUUID(),
       pid: process.pid,
-      processFingerprint: `${process.platform}:${process.pid}`,
+      processFingerprint: this.processFingerprint(process.pid) ?? `unavailable:${process.pid}`,
       projectDirectory: input.projectDirectory,
       sessionIDs: [...input.sessionIDs],
       heartbeatAt: this.now(),
@@ -116,8 +120,15 @@ export class PluginInstanceRegistry {
     // 同时要求进程存活和心跳新鲜，降低 PID 复用造成的幽灵实例。
     return records.filter((item) =>
       this.processAlive(item.pid) &&
+      this.fingerprintMatches(item) &&
       this.now() - item.heartbeatAt <= this.staleAfterMs
     )
+  }
+
+  private fingerprintMatches(item: PluginInstanceRecord): boolean {
+    // 无法读取启动时间时退回 PID 存活检查，可读取时拒绝复用 PID。
+    const current = this.processFingerprint(item.pid)
+    return current === null || current === item.processFingerprint
   }
 }
 

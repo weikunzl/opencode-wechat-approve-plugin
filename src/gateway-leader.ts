@@ -3,6 +3,7 @@ import type {
   TransportHealthSupervisor,
   TransportStopOptions,
 } from "./transport-health-supervisor.js"
+import { TransportStartReason } from "./transport-health-supervisor.js"
 import type { InboundApprovalMessage } from "./wechat-gateway.js"
 import { SharedMailbox } from "./shared-mailbox.js"
 
@@ -28,6 +29,7 @@ interface GatewayLeaderOptions {
   shouldNotifyStop?: () => boolean
   timers?: Partial<LeaderTimers>
   random?: () => number
+  wait?: (milliseconds: number) => Promise<void>
 }
 
 interface LeaderTimers {
@@ -38,6 +40,8 @@ interface LeaderTimers {
 enum LeaderTiming {
   RetryBaseMs = 3_000,
   RetryJitterMs = 1_000,
+  FinalRetryMs = 50,
+  FinalRetryAttempts = 40,
 }
 
 export class GatewayLeader {
@@ -49,16 +53,21 @@ export class GatewayLeader {
   private onLeadership: ((active: boolean) => void) | null = null
   private readonly timers: LeaderTimers
   private readonly random: () => number
+  private readonly wait: (milliseconds: number) => Promise<void>
+  private contended = false
+  private transition = 0
 
   constructor(private readonly options: GatewayLeaderOptions) {
     // 定时器和随机源可注入，接管测试不依赖真实等待。
     this.timers = { ...defaultLeaderTimers(), ...options.timers }
     this.random = options.random ?? Math.random
+    this.wait = options.wait ?? delay
   }
 
   async start(onMessage: (message: InboundApprovalMessage) => Promise<void>): Promise<boolean> {
     // 所有实例保留接管意图，只有租约持有者激活微信 transport。
     this.desired = true
+    this.transition += 1
     this.onMessage = onMessage
     return this.tryActivate()
   }
@@ -71,15 +80,28 @@ export class GatewayLeader {
   async stop(): Promise<void> {
     // 停止先关闭回调入口，再释放租约，避免旧 Leader 继续发送命令。
     this.desired = false
+    this.transition += 1
     this.clearRetry()
-    if (!this.running) return
-    await this.deactivate({ sendNotice: this.options.shouldNotifyStop?.() ?? true })
-    this.options.lease.release()
+    const sendNotice = this.shouldNotifyStop()
+    if (!this.running) return this.stopFinalSecondary(sendNotice)
+    try {
+      await this.deactivate({ sendNotice, preserveHealth: !sendNotice })
+    } finally {
+      this.options.lease.release()
+    }
   }
 
   async handleLeaseLoss(): Promise<void> {
     // 丢失租约时不发送停止通知，保留插件实例等待重新选举。
-    if (this.running) await this.deactivate({ sendNotice: false, cleanShutdown: false })
+    this.contended = true
+    this.transition += 1
+    if (this.running) {
+      await this.deactivate({
+        sendNotice: false,
+        cleanShutdown: false,
+        preserveHealth: true,
+      })
+    }
     if (this.desired) this.scheduleRetry()
   }
 
@@ -127,21 +149,34 @@ export class GatewayLeader {
     // 获取失败进入低频重试，获取成功后只初始化一次 transport。
     if (!this.desired || this.running) return this.running
     if (!this.options.lease.acquire()) {
+      this.contended = true
       this.scheduleRetry()
       return false
     }
-    const active = await this.activate()
-    if (!active) this.scheduleRetry()
-    return active
+    const transition = this.transition
+    try {
+      const active = await this.activate(transition)
+      if (!active) this.scheduleRetry()
+      return active
+    } catch (error) {
+      return this.handleActivationFailure(error)
+    }
   }
 
-  private async activate(): Promise<boolean> {
+  private async activate(transition: number): Promise<boolean> {
     // recorder 必须在 supervisor 启动长轮询前配置。
     this.configureRecorder()
     this.running = true
     const handler = (message: InboundApprovalMessage) => this.handleCurrentMessage(message)
-    if (this.options.supervisor) await this.options.supervisor.start(handler)
+    if (this.options.supervisor) {
+      const reason = this.contended
+        ? TransportStartReason.Takeover
+        : TransportStartReason.Restart
+      await this.options.supervisor.start(handler, reason)
+    }
     else if (!(await this.startLegacy(handler))) return false
+    if (!this.activationIsCurrent(transition)) return false
+    this.contended = false
     this.onLeadership?.(true)
     return true
   }
@@ -192,6 +227,54 @@ export class GatewayLeader {
     this.timers.clearTimeout(this.retryTimer)
     this.retryTimer = null
   }
+
+  private shouldNotifyStop(): boolean {
+    // 注册表短暂冲突时保守跳过消息，但绝不能阻断 transport 清理。
+    try {
+      return this.options.shouldNotifyStop?.() ?? true
+    } catch {
+      return false
+    }
+  }
+
+  private async stopFinalSecondary(sendNotice: boolean): Promise<void> {
+    // 最后退出的非 Leader 临时取得租约，只发送一次停止通知。
+    if (!sendNotice || !this.options.supervisor) return
+    if (!(await this.acquireFinalLease())) return
+    try {
+      await this.options.supervisor.stop({ sendNotice: true })
+    } finally {
+      this.options.lease.release()
+    }
+  }
+
+  private activationIsCurrent(transition: number): boolean {
+    // 异步激活完成前若停止或丢租约，不得迟到宣布 Leader。
+    return this.desired && this.running && this.transition === transition
+  }
+
+  private handleActivationFailure(error: unknown): false {
+    // 激活失败释放租约并保留有界重试，不泄漏 transport 错误正文。
+    this.running = false
+    this.options.lease.release()
+    this.scheduleRetry()
+    console.error(`[wechat] Leader 激活失败: ${firstLine(error)}`)
+    return false
+  }
+
+  private async acquireFinalLease(): Promise<boolean> {
+    // 两实例重叠退出时短暂等待旧 Leader 释放租约。
+    for (let attempt = 0; attempt < LeaderTiming.FinalRetryAttempts; attempt += 1) {
+      if (this.options.lease.acquire()) return true
+      await this.wait(LeaderTiming.FinalRetryMs)
+    }
+    return false
+  }
+}
+
+function delay(milliseconds: number): Promise<void> {
+  // 最终退出竞争只做有界短等待，不创建常驻任务。
+  return new Promise((resolve) => setTimeout(resolve, milliseconds))
 }
 
 function digest(value: string): string {

@@ -1,7 +1,7 @@
 import crypto from "node:crypto"
 import type { AccountData, GetUpdatesResponse } from "./types.js"
 import { MSG_ITEM_TEXT, MSG_STATE_FINISH, MSG_TYPE_BOT } from "./types.js"
-import type { IlinkTransport } from "./wechat-gateway.js"
+import type { IlinkTransport, SendTextInput } from "./wechat-gateway.js"
 import { WeChatStore } from "./store.js"
 
 const ILINK_BASE = "https://ilinkai.weixin.qq.com"
@@ -188,28 +188,24 @@ export class IlinkClientTransport implements IlinkTransport {
     }
   }
 
-  async sendText(
-    to: string,
-    text: string,
-    contextToken: string,
-    idempotencyKey: string,
-  ): Promise<void> {
+  async sendText(input: SendTextInput): Promise<void> {
+    // 具名对象固定发送边界，新增可选项时不改变调用参数顺序。
     await this.apiCall("ilink/bot/sendmessage", {
       msg: {
         from_user_id: "",
-        to_user_id: to,
+        to_user_id: input.to,
         client_id: `opencode-wechat:${crypto
           .createHash("sha256")
-          .update(idempotencyKey)
+          .update(input.idempotencyKey)
           .digest("hex")
           .slice(0, 32)}`,
         message_type: MSG_TYPE_BOT,
         message_state: MSG_STATE_FINISH,
-        item_list: [{ type: MSG_ITEM_TEXT, text_item: { text } }],
-        context_token: contextToken,
+        item_list: [{ type: MSG_ITEM_TEXT, text_item: { text: input.text } }],
+        context_token: input.contextToken,
       },
       base_info: { channel_version: "1.0.0" },
-    })
+    }, 15_000, input.signal)
   }
 
   private async apiCall(
