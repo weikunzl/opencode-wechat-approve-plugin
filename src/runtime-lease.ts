@@ -167,11 +167,10 @@ export class RuntimeLease {
   }
 
   private lose(): void {
+    // 回调跨接管周期保持注册，重新取得租约后仍能报告后续丢失。
     if (this.timer) clearInterval(this.timer)
     this.timer = null
-    const callback = this.onLost
-    this.onLost = null
-    callback?.()
+    this.onLost?.()
   }
 
   private record(): LeaseRecord {
@@ -228,7 +227,7 @@ function readLeaseFile(file: string): LeaseRecord | null {
   }
 }
 
-function processFingerprint(pid: number): string | null {
+export function processFingerprint(pid: number): string | null {
   try {
     if (process.platform === "linux") {
       const stat = fs.readFileSync(`/proc/${pid}/stat`, "utf8")

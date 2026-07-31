@@ -1,5 +1,5 @@
 import assert from "node:assert/strict"
-import { mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs"
+import { mkdtempSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import test from "node:test"
@@ -100,5 +100,30 @@ test("reports lease loss after another owner replaces the file", async () => {
   await new Promise((resolve) => setTimeout(resolve, 30))
 
   assert.equal(lost, true)
+  lease.release()
+})
+
+test("reports a second lease loss after reacquiring ownership", async () => {
+  const root = mkdtempSync(join(tmpdir(), "wechat-runtime-lease-second-loss-"))
+  let losses = 0
+  const lease = new RuntimeLease(root, { heartbeatIntervalMs: 10 })
+  lease.setOnLost(() => {
+    losses += 1
+  })
+  assert.equal(lease.acquire(), true)
+  writeFileSync(
+    join(root, "runtime-lease.json"),
+    JSON.stringify({ instanceID: "replacement-1", pid: process.pid, heartbeatAt: Date.now() }),
+  )
+  await new Promise((resolve) => setTimeout(resolve, 30))
+  unlinkSync(join(root, "runtime-lease.json"))
+  assert.equal(lease.acquire(), true)
+  writeFileSync(
+    join(root, "runtime-lease.json"),
+    JSON.stringify({ instanceID: "replacement-2", pid: process.pid, heartbeatAt: Date.now() }),
+  )
+  await new Promise((resolve) => setTimeout(resolve, 30))
+
+  assert.equal(losses, 2)
   lease.release()
 })

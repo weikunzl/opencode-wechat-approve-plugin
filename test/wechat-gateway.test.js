@@ -46,7 +46,7 @@ function harness() {
   const sent = []
   const transport = {
     poll: async () => batches.shift() ?? { ret: 0, msgs: [], get_updates_buf: "empty" },
-    sendText: async (to, text, contextToken, idempotencyKey) => {
+    sendText: async ({ to, text, contextToken, idempotencyKey }) => {
       sent.push({ to, text, contextToken, idempotencyKey })
     },
     login: async () => {
@@ -170,6 +170,20 @@ test("persists outbound notification until delivery succeeds", async () => {
   assert.deepEqual(store.loadOutbox(), [])
 })
 
+test("sends a transport health probe without adding it to the durable outbox", async () => {
+  const { gateway, store, sent } = harness()
+
+  await gateway.probe({
+    id: "health:start:one",
+    kind: "warning",
+    text: "重新连接",
+    createdAt: 1,
+  })
+
+  assert.equal(sent.length, 1)
+  assert.deepEqual(store.loadOutbox(), [])
+})
+
 test("keeps a failed outbound notification queued for retry", async () => {
   const { store } = harness()
   const gateway = new WeChatGateway(store, {
@@ -232,7 +246,7 @@ test("refreshes context from a new message before retrying the outbox", async ()
       throw new Error("not expected")
     },
     poll: async () => batches.shift() ?? { ret: 0, msgs: [] },
-    sendText: async (_to, _text, contextToken) => {
+    sendText: async ({ contextToken }) => {
       contexts.push(contextToken)
       if (failed) {
         failed = false
@@ -287,6 +301,31 @@ test("requires rebinding after an iLink session timeout", async () => {
 
   store.saveContext({ boundUserID: "owner@im.wechat", contextToken: "fresh-ctx", updatedAt: 2 })
   assert.equal(store.loadContext().contextToken, "fresh-ctx")
+})
+
+test("reports poll transport failures to the health supervisor", async () => {
+  const { store } = harness()
+  const failures = []
+  const failure = new IlinkApiError({
+    endpoint: "/ilink/bot/getupdates",
+    ret: 0,
+    errcode: IlinkErrorCode.SessionTimeout,
+    errmsg: "session timeout",
+  })
+  const gateway = new WeChatGateway(store, {
+    login: async () => {
+      throw new Error("not expected")
+    },
+    poll: async () => {
+      throw failure
+    },
+    sendText: async () => {},
+  })
+  gateway.setTransportErrorHandler((error) => failures.push(error))
+
+  await assert.rejects(gateway.pollOnce(async () => {}), /errcode=-14/)
+
+  assert.deepEqual(failures, [failure])
 })
 
 test("includes redacted transport diagnostics without credentials", async () => {

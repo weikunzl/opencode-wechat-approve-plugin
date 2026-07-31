@@ -1,5 +1,6 @@
 import crypto from "node:crypto"
 import path from "node:path"
+import { processFingerprint } from "./runtime-lease.js"
 import { acquireDirectoryLock, ensureSharedDirectory, readSharedJSON, writeSharedJSON } from "./shared-file.js"
 
 export enum InstanceStatus {
@@ -24,15 +25,34 @@ interface InstanceInput {
 const INSTANCE_FILE = "plugin-instances-v1.json"
 const LOCK_DIRECTORY = "plugin-instances.lock"
 
+enum InstanceTiming {
+  StaleAfterMs = 60_000,
+}
+
+interface InstanceRegistryOptions {
+  now?: () => number
+  processAlive?: (pid: number) => boolean
+  processFingerprint?: (pid: number) => string | null
+  staleAfterMs?: number
+}
+
 export class PluginInstanceRegistry {
   private readonly file: string
   private readonly lock: string
+  private readonly now: () => number
+  private readonly processAlive: (pid: number) => boolean
+  private readonly processFingerprint: (pid: number) => string | null
+  private readonly staleAfterMs: number
 
-  constructor(private readonly directory: string, private readonly now: () => number = Date.now) {
+  constructor(private readonly directory: string, options: InstanceRegistryOptions = {}) {
     // 实例注册与共享绑定使用同一受保护目录。
     ensureSharedDirectory(directory)
     this.file = path.join(directory, INSTANCE_FILE)
     this.lock = path.join(directory, LOCK_DIRECTORY)
+    this.now = options.now ?? Date.now
+    this.processAlive = options.processAlive ?? isProcessAlive
+    this.processFingerprint = options.processFingerprint ?? processFingerprint
+    this.staleAfterMs = options.staleAfterMs ?? InstanceTiming.StaleAfterMs
   }
 
   register(input: InstanceInput): PluginInstanceRecord {
@@ -63,12 +83,17 @@ export class PluginInstanceRegistry {
     return readSharedJSON<PluginInstanceRecord[]>(this.file, []).filter(isInstanceRecord)
   }
 
+  prune(): PluginInstanceRecord[] {
+    // 清除死亡 PID 与过期心跳，doctor 不再累计历史 active 实例。
+    return this.update((records) => this.liveRecords(records))
+  }
+
   private createRecord(input: InstanceInput): PluginInstanceRecord {
     // processFingerprint 用于诊断 PID 复用，但不包含用户或凭据数据。
     return {
       instanceID: crypto.randomUUID(),
       pid: process.pid,
-      processFingerprint: `${process.platform}:${process.pid}`,
+      processFingerprint: this.processFingerprint(process.pid) ?? `unavailable:${process.pid}`,
       projectDirectory: input.projectDirectory,
       sessionIDs: [...input.sessionIDs],
       heartbeatAt: this.now(),
@@ -81,7 +106,7 @@ export class PluginInstanceRegistry {
     const owner = acquireDirectoryLock(this.lock)
     if (!owner) throw new Error("plugin instance registry is busy")
     try {
-      const records = this.list()
+      const records = this.liveRecords(this.list())
       const result = operation(records)
       const next = Array.isArray(result) ? result : records
       writeSharedJSON(this.file, next)
@@ -89,6 +114,21 @@ export class PluginInstanceRegistry {
     } finally {
       owner.release()
     }
+  }
+
+  private liveRecords(records: PluginInstanceRecord[]): PluginInstanceRecord[] {
+    // 同时要求进程存活和心跳新鲜，降低 PID 复用造成的幽灵实例。
+    return records.filter((item) =>
+      this.processAlive(item.pid) &&
+      this.fingerprintMatches(item) &&
+      this.now() - item.heartbeatAt <= this.staleAfterMs
+    )
+  }
+
+  private fingerprintMatches(item: PluginInstanceRecord): boolean {
+    // 无法读取启动时间时退回 PID 存活检查，可读取时拒绝复用 PID。
+    const current = this.processFingerprint(item.pid)
+    return current === null || current === item.processFingerprint
   }
 }
 
@@ -100,4 +140,14 @@ function isInstanceRecord(value: unknown): value is PluginInstanceRecord {
     typeof item.processFingerprint === "string" && typeof item.projectDirectory === "string" &&
     Array.isArray(item.sessionIDs) && item.sessionIDs.every((id) => typeof id === "string") &&
     typeof item.heartbeatAt === "number" && item.status === InstanceStatus.Active
+}
+
+function isProcessAlive(pid: number): boolean {
+  // EPERM 仍表示进程存在；其他错误按已退出处理。
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (error) {
+    return error instanceof Error && "code" in error && error.code === "EPERM"
+  }
 }

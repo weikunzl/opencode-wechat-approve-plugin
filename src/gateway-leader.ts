@@ -1,4 +1,9 @@
 import crypto from "node:crypto"
+import type {
+  TransportHealthSupervisor,
+  TransportStopOptions,
+} from "./transport-health-supervisor.js"
+import { TransportStartReason } from "./transport-health-supervisor.js"
 import type { InboundApprovalMessage } from "./wechat-gateway.js"
 import { SharedMailbox } from "./shared-mailbox.js"
 
@@ -20,30 +25,84 @@ interface GatewayLeaderOptions {
   mailbox: SharedMailbox
   lease: LeaseLike
   ownerInstanceID: string
+  supervisor?: Pick<TransportHealthSupervisor, "start" | "stop">
+  shouldNotifyStop?: () => boolean
+  timers?: Partial<LeaderTimers>
+  random?: () => number
+  wait?: (milliseconds: number) => Promise<void>
+}
+
+interface LeaderTimers {
+  setTimeout(callback: () => void, milliseconds: number): unknown
+  clearTimeout(id: unknown): void
+}
+
+enum LeaderTiming {
+  RetryBaseMs = 3_000,
+  RetryJitterMs = 1_000,
+  FinalRetryMs = 50,
+  FinalRetryAttempts = 40,
 }
 
 export class GatewayLeader {
   private running = false
+  private desired = false
   private recorderConfigured = false
+  private retryTimer: unknown = null
+  private onMessage: ((message: InboundApprovalMessage) => Promise<void>) | null = null
+  private onLeadership: ((active: boolean) => void) | null = null
+  private readonly timers: LeaderTimers
+  private readonly random: () => number
+  private readonly wait: (milliseconds: number) => Promise<void>
+  private contended = false
+  private transition = 0
 
-  constructor(private readonly options: GatewayLeaderOptions) {}
+  constructor(private readonly options: GatewayLeaderOptions) {
+    // 定时器和随机源可注入，接管测试不依赖真实等待。
+    this.timers = { ...defaultLeaderTimers(), ...options.timers }
+    this.random = options.random ?? Math.random
+    this.wait = options.wait ?? delay
+  }
 
   async start(onMessage: (message: InboundApprovalMessage) => Promise<void>): Promise<boolean> {
-    // 只有租约持有者初始化 transport 和长轮询，其他进程保持插件事件可用。
-    if (!this.options.lease.acquire()) return false
-    if ((await this.options.gateway.initialize()) !== "ready") return this.stopBeforeStart()
-    await this.options.gateway.flushOutbox()
-    this.configureRecorder()
-    this.running = true
-    this.options.gateway.start((message) => this.handleMessage(message, onMessage))
-    return true
+    // 所有实例保留接管意图，只有租约持有者激活微信 transport。
+    this.desired = true
+    this.transition += 1
+    this.onMessage = onMessage
+    return this.tryActivate()
+  }
+
+  setLeadershipHandler(handler: (active: boolean) => void): void {
+    // 运行时通过回调同步事件 drain 和权限 reconcile。
+    this.onLeadership = handler
   }
 
   async stop(): Promise<void> {
     // 停止先关闭回调入口，再释放租约，避免旧 Leader 继续发送命令。
-    this.running = false
-    await this.options.gateway.stop()
-    this.options.lease.release()
+    this.desired = false
+    this.transition += 1
+    this.clearRetry()
+    const sendNotice = this.shouldNotifyStop()
+    if (!this.running) return this.stopFinalSecondary(sendNotice)
+    try {
+      await this.deactivate({ sendNotice, preserveHealth: !sendNotice })
+    } finally {
+      this.options.lease.release()
+    }
+  }
+
+  async handleLeaseLoss(): Promise<void> {
+    // 丢失租约时不发送停止通知，保留插件实例等待重新选举。
+    this.contended = true
+    this.transition += 1
+    if (this.running) {
+      await this.deactivate({
+        sendNotice: false,
+        cleanShutdown: false,
+        preserveHealth: true,
+      })
+    }
+    if (this.desired) this.scheduleRetry()
   }
 
   private async handleMessage(
@@ -76,9 +135,169 @@ export class GatewayLeader {
     this.options.lease.release()
     return false
   }
+
+  private async recoverOutbox(): Promise<void> {
+    // 旧通知失败不能阻止长轮询启动，否则会形成持有租约的假 Leader。
+    try {
+      await this.options.gateway.flushOutbox()
+    } catch (error) {
+      console.error(`[wechat] 通知队列恢复失败: ${firstLine(error)}`)
+    }
+  }
+
+  private async tryActivate(): Promise<boolean> {
+    // 获取失败进入低频重试，获取成功后只初始化一次 transport。
+    if (!this.desired || this.running) return this.running
+    if (!this.options.lease.acquire()) {
+      this.contended = true
+      this.scheduleRetry()
+      return false
+    }
+    const transition = this.transition
+    try {
+      const active = await this.activate(transition)
+      if (!active) this.scheduleRetry()
+      return active
+    } catch (error) {
+      return this.handleActivationFailure(error)
+    }
+  }
+
+  private async activate(transition: number): Promise<boolean> {
+    // recorder 必须在 supervisor 启动长轮询前配置。
+    this.configureRecorder()
+    this.running = true
+    const handler = (message: InboundApprovalMessage) => this.handleCurrentMessage(message)
+    if (this.options.supervisor) {
+      const reason = this.contended
+        ? TransportStartReason.Takeover
+        : TransportStartReason.Restart
+      await this.options.supervisor.start(handler, reason)
+    }
+    else if (!(await this.startLegacy(handler))) return false
+    if (!this.activationIsCurrent(transition)) return false
+    this.contended = false
+    this.onLeadership?.(true)
+    return true
+  }
+
+  private async startLegacy(
+    handler: (message: InboundApprovalMessage) => Promise<void>,
+  ): Promise<boolean> {
+    // 兼容测试与旧组合入口，同时保持 outbox 失败非致命。
+    if ((await this.options.gateway.initialize()) !== "ready") {
+      this.running = false
+      return this.stopBeforeStart()
+    }
+    await this.recoverOutbox()
+    this.options.gateway.start(handler)
+    return true
+  }
+
+  private handleCurrentMessage(message: InboundApprovalMessage): Promise<void> {
+    // 接管后始终使用最新注册的业务回调。
+    return this.onMessage ? this.handleMessage(message, this.onMessage) : Promise.resolve()
+  }
+
+  private async deactivate(options: TransportStopOptions): Promise<void> {
+    // 先关闭消息入口，再停止 supervisor 或兼容 gateway。
+    this.running = false
+    this.onLeadership?.(false)
+    if (this.options.supervisor) await this.options.supervisor.stop(options)
+    else await this.options.gateway.stop()
+  }
+
+  private scheduleRetry(): void {
+    // 非 Leader 使用带抖动的低频重试，避免多个进程同时争抢租约。
+    if (!this.desired || this.retryTimer !== null) return
+    const delay = LeaderTiming.RetryBaseMs +
+      Math.floor(this.random() * LeaderTiming.RetryJitterMs)
+    this.retryTimer = this.timers.setTimeout(() => {
+      this.retryTimer = null
+      void this.tryActivate().catch((error) =>
+        console.error(`[wechat] Leader 接管失败: ${firstLine(error)}`),
+      )
+    }, delay)
+    unrefTimer(this.retryTimer)
+  }
+
+  private clearRetry(): void {
+    // 插件释放后取消尚未执行的接管竞争。
+    if (this.retryTimer === null) return
+    this.timers.clearTimeout(this.retryTimer)
+    this.retryTimer = null
+  }
+
+  private shouldNotifyStop(): boolean {
+    // 注册表短暂冲突时保守跳过消息，但绝不能阻断 transport 清理。
+    try {
+      return this.options.shouldNotifyStop?.() ?? true
+    } catch {
+      return false
+    }
+  }
+
+  private async stopFinalSecondary(sendNotice: boolean): Promise<void> {
+    // 最后退出的非 Leader 临时取得租约，只发送一次停止通知。
+    if (!sendNotice || !this.options.supervisor) return
+    if (!(await this.acquireFinalLease())) return
+    try {
+      await this.options.supervisor.stop({ sendNotice: true })
+    } finally {
+      this.options.lease.release()
+    }
+  }
+
+  private activationIsCurrent(transition: number): boolean {
+    // 异步激活完成前若停止或丢租约，不得迟到宣布 Leader。
+    return this.desired && this.running && this.transition === transition
+  }
+
+  private handleActivationFailure(error: unknown): false {
+    // 激活失败释放租约并保留有界重试，不泄漏 transport 错误正文。
+    this.running = false
+    this.options.lease.release()
+    this.scheduleRetry()
+    console.error(`[wechat] Leader 激活失败: ${firstLine(error)}`)
+    return false
+  }
+
+  private async acquireFinalLease(): Promise<boolean> {
+    // 两实例重叠退出时短暂等待旧 Leader 释放租约。
+    for (let attempt = 0; attempt < LeaderTiming.FinalRetryAttempts; attempt += 1) {
+      if (this.options.lease.acquire()) return true
+      await this.wait(LeaderTiming.FinalRetryMs)
+    }
+    return false
+  }
+}
+
+function delay(milliseconds: number): Promise<void> {
+  // 最终退出竞争只做有界短等待，不创建常驻任务。
+  return new Promise((resolve) => setTimeout(resolve, milliseconds))
 }
 
 function digest(value: string): string {
   // 邮箱只保存摘要，原始微信正文仍留在内存回调中处理。
   return crypto.createHash("sha256").update(value).digest("hex").slice(0, 16)
+}
+
+function firstLine(error: unknown): string {
+  // 日志只保留已由 gateway 脱敏的首行诊断。
+  return (error instanceof Error ? error.message : String(error)).split(/\r?\n/, 1)[0]
+}
+
+function defaultLeaderTimers(): LeaderTimers {
+  // 接管定时器只依附当前 OpenCode 插件实例。
+  return {
+    setTimeout: (callback, milliseconds) => globalThis.setTimeout(callback, milliseconds),
+    clearTimeout: (id) => globalThis.clearTimeout(id as ReturnType<typeof setTimeout>),
+  }
+}
+
+function unrefTimer(timer: unknown): void {
+  // 定时接管不能单独阻止 OpenCode 退出。
+  if (timer && typeof timer === "object" && "unref" in timer) {
+    (timer as { unref(): void }).unref()
+  }
 }

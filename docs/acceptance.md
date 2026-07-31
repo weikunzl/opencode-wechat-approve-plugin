@@ -34,6 +34,11 @@ REAL-00 至 REAL-18 的安全与恢复验收矩阵、受影响/全量执行档�
 
 发布前必须根据 [`docs/release-impact-1.1.0.md`](release-impact-1.1.0.md) 识别受影响场景；严格标题场景需 `PASS + SCREEN`，人工场景需符合预期的完整结构化文字证据并标记 `PASS + MANUAL_REPORTED`。用户可以选择按矩阵执行 REAL-00～REAL-18 全量真实回归；任一真实线程 `BLOCKED` 或 `UNVERIFIED` 都不能改写为通过。
 
+1.1.3 的重启健康恢复变更按
+[`docs/release-impact-1.1.3.md`](release-impact-1.1.3.md) 执行增量门禁。
+`doctor` 中 binding 仅证明凭据存在；transport 为 healthy 且具有最近成功时间，
+才证明本次运行的真实发送探测成功。全部 OpenCode 实例退出后不存在插件外监控。
+
 人工协作模式下，用户每条场景开始前必须以真实线程文字确认目标会话和绑定身份；真实线程须保留原始窗口标题、用户确认、微信原文、脱敏决策、pending/outbox、清理结果和操作者时间。`MANUAL_CONFIRMED` 仅表示身份确认；字段完整且符合预期时标记 `PASS + MANUAL_REPORTED`。主线程只接受完整结构化文字日志。
 
 可用 `npm run test:e2e:status` 做一轮无副作用状态扫描，或用 `npm run test:e2e:status -- --interval=30000` 周期扫描。输出包含来源、观察时间、服务端与本地的脱敏 request ID、pending/outbox 前后快照；扫描器不会读取微信屏幕，也不会自动把任何真实场景标记为通过。
