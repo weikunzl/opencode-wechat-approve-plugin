@@ -10,6 +10,12 @@ import {
   resolveApprovalAgentNames,
   resolveEffectiveModel,
 } from "../dist/cli.js"
+import {
+  TransportFailureKind,
+  TransportHealthStatus,
+  defaultTransportHealth,
+} from "../dist/transport-health.js"
+import { WeChatStore } from "../dist/store.js"
 
 test("parses OpenCode paths containing Windows drive letters and spaces", () => {
   const paths = parseOpenCodePaths(
@@ -97,8 +103,71 @@ test("doctor reports plugin binding model and native shared runtime independentl
     plugin: { ok: true, detail: "configured" },
     binding: { ok: true, detail: "bound" },
     model: { ok: true, detail: "opencode-go/qwen3.7-max" },
+    transport: { ok: false, detail: "unknown: no successful transport probe" },
     sharedState: { ok: true, detail: "shared state directory ready" },
     instances: { ok: true, detail: "0 active instance(s)" },
     leader: { ok: true, detail: "not elected" },
   })
 })
+
+test("doctor distinguishes healthy transport from a persisted binding", async () => {
+  const state = doctorFixture()
+  const store = new WeChatStore(state.stateDirectory)
+  store.saveTransportHealth({
+    ...defaultTransportHealth(),
+    status: TransportHealthStatus.Healthy,
+    lastSuccessAt: 1_000,
+    cleanShutdown: false,
+  })
+
+  const result = await doctorInstallation(state.options)
+
+  assert.equal(result.binding.ok, true)
+  assert.equal(result.transport.ok, true)
+  assert.match(result.transport.detail, /healthy.*1970-01-01T00:00:01.000Z/)
+})
+
+test("doctor requires bind after an expired WeChat session", async () => {
+  const state = doctorFixture()
+  const store = new WeChatStore(state.stateDirectory)
+  store.saveTransportHealth({
+    ...defaultTransportHealth(),
+    status: TransportHealthStatus.NeedsRebind,
+    lastFailureKind: TransportFailureKind.SessionExpired,
+    cleanShutdown: false,
+  })
+
+  const result = await doctorInstallation(state.options)
+
+  assert.equal(result.binding.ok, true)
+  assert.equal(result.transport.ok, false)
+  assert.match(result.transport.detail, /needs rebind.*wechat-approve bind/)
+})
+
+function doctorFixture() {
+  const root = mkdtempSync(join(tmpdir(), "wechat-doctor-health-"))
+  const configFile = join(root, "opencode.jsonc")
+  const stateDirectory = join(root, "wechat-approve")
+  mkdirSync(stateDirectory)
+  writeFileSync(configFile, '{"plugin":["@wekux/opencode-wechat-approve-plugin@latest"]}')
+  writeFileSync(
+    join(stateDirectory, "config.json"),
+    JSON.stringify({ model: "opencode-go/qwen3.7-max" }),
+  )
+  writeFileSync(
+    join(stateDirectory, "account.json"),
+    '{"token":"x","baseUrl":"https://example","accountId":"bot"}',
+  )
+  writeFileSync(
+    join(stateDirectory, "context-v1.json"),
+    '{"boundUserID":"owner","contextToken":"x","updatedAt":1}',
+  )
+  return {
+    stateDirectory,
+    options: {
+      configFile,
+      stateDirectory,
+      availableModels: ["opencode-go/qwen3.7-max"],
+    },
+  }
+}

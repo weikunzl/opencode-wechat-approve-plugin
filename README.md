@@ -19,6 +19,8 @@ V1 是通知与审批插件，不是聊天机器人：普通微信消息不会�
 - 同时存在多个待审批时，通过编号、项目、操作或“两个都”等语言二次确认
 - 使用安装时确认的模型辅助解释复杂审批回复；模型不能调用工具或直接授权
 - outbox、轮询游标、去重记录、待审批和会话状态均可在重启后恢复
+- OpenCode 重启后自动探测微信传输；异常时退避重试，新绑定生效后无需再次重启
+- 最后一个 OpenCode 实例正常退出时发送停止通知，全部退出后不会残留常驻监控
 - 支持 Windows、macOS 和 Linux
 
 ## 运行结构
@@ -121,10 +123,18 @@ npm exec --yes --package=@wekux/opencode-wechat-approve-plugin -- wechat-approve
 
 - 全局插件配置
 - 微信账号与绑定上下文
+- 微信传输健康、最近成功时间和是否需要重新绑定
 - 已确认模型是否仍可用
 - 共享状态目录权限
 - 已注册插件实例数量
 - 当前 Leader 租约摘要
+
+微信传输监督器只存在于 OpenCode 插件生命周期内，不是独立守护进程。启动时若
+上次未正常关闭、绑定上下文陈旧、存在 outbox 积压或健康状态异常，会发送
+`🔄 [OpenCode] 微信授权插件已重新连接` 进行真实探测；健康且处于冷却期时不会
+重复提示。最后一个实例正常退出时会尽力发送
+`⏹️ [OpenCode] 微信授权插件已停止`，最多等待 2 秒。所有 OpenCode 实例关闭后，
+插件不再轮询、探测或监控。
 
 补充或恢复绑定：
 
@@ -137,6 +147,8 @@ npm exec --yes --package=@wekux/opencode-wechat-approve-plugin -- wechat-approve
 | 现象 | 处理 |
 | --- | --- |
 | 多个实例没有通知 | 确认各 OpenCode 会话均加载相同 registry 插件规格，并运行上方的 `doctor` 命令检查实例和 Leader |
+| `doctor` 显示 `degraded` | 保持 OpenCode 运行，插件会按上限退避自动重试；检查网络和代理后再次运行 `doctor` |
+| `doctor` 显示 `needs rebind` | 运行上方的 `bind` 命令重新扫码并发送固定文本 `绑定`；新绑定会被运行中的 Leader 自动接管 |
 | `Model not found: opencode/...` | 运行上方的 `doctor` 命令，重新安装并选择 `opencode models` 中存在的完整 provider/model |
 | `微信 API 网络错误` | 根据提示中的安全错误码检查网络：`ENOTFOUND`/`EAI_AGAIN` 检查 DNS 或代理；`ECONNREFUSED`/`ENETUNREACH` 检查网络、防火墙或代理；超时检查网络质量和代理可达性 |
 | 能收到旧消息但收不到主动通知 | 运行上方的 `bind` 命令，向机器人发送一次固定文本 `绑定` |
@@ -158,6 +170,7 @@ npm exec --yes --package=@wekux/opencode-wechat-approve-plugin -- wechat-approve
 ├── context-invalid.json       # iLink -14 后生成，重新绑定或收到新 context 后清除
 ├── processed-messages.json
 ├── runtime.json
+├── transport-health-v1.json  # 仅保存脱敏状态、失败类别和时间，不保存凭据
 ├── shared-mailbox-v1.json
 ├── plugin-instances-v1.json
 ├── approval-index-v1.json

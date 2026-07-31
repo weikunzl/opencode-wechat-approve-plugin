@@ -4,6 +4,7 @@ import { parse } from "jsonc-parser"
 import { isOwnedPluginSpec } from "./install.js"
 import { PluginInstanceRegistry } from "./plugin-instance.js"
 import { WeChatStore } from "./store.js"
+import { TransportHealthStatus } from "./transport-health.js"
 
 export interface OpenCodePaths {
   home?: string
@@ -25,6 +26,7 @@ export interface DoctorResult {
   plugin: Check
   binding: Check
   model: Check
+  transport: Check
   sharedState: Check
   instances: Check
   leader: Check
@@ -99,19 +101,44 @@ export async function doctorInstallation(options: {
         }
 
   const registry = new PluginInstanceRegistry(options.stateDirectory)
-  const instances = registry.list()
+  const instances = registry.prune()
   const sharedState = { ok: fs.existsSync(options.stateDirectory), detail: "shared state directory ready" }
   const activeInstances = instances.filter((item) => item.status === "active").length
   const leader = readLeaderCheck(options.stateDirectory)
+  const transport = readTransportCheck(store)
 
   return {
     plugin: { ok: configured, detail: configured ? "configured" : "not configured" },
     binding: { ok: bound, detail: bound ? "bound" : "not bound" },
     model,
+    transport,
     sharedState,
     instances: { ok: true, detail: `${activeInstances} active instance(s)` },
     leader,
   }
+}
+
+function readTransportCheck(store: WeChatStore): Check {
+  // doctor 区分凭据存在与真实传输健康，避免把过期绑定误报为可用。
+  const health = store.loadTransportHealth()
+  if (health.status === TransportHealthStatus.Healthy) {
+    return { ok: true, detail: `healthy lastSuccessAt=${formatTimestamp(health.lastSuccessAt)}` }
+  }
+  if (health.status === TransportHealthStatus.NeedsRebind) {
+    return { ok: false, detail: "needs rebind; run wechat-approve bind" }
+  }
+  if (health.lastSuccessAt === null) {
+    return { ok: false, detail: "unknown: no successful transport probe" }
+  }
+  return {
+    ok: false,
+    detail: `${health.status} lastSuccessAt=${formatTimestamp(health.lastSuccessAt)}`,
+  }
+}
+
+function formatTimestamp(value: number | null): string {
+  // 缺失时间使用 unknown，输出仅包含非敏感健康摘要。
+  return value === null ? "unknown" : new Date(value).toISOString()
 }
 
 function readJSONC(file: string): unknown {
