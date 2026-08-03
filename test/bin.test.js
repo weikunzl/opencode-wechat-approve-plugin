@@ -11,4 +11,5 @@ test("help presents setup as the first-time initialization command", () => {
   assert.equal(result.status, 0)
   assert.match(result.stdout, /wechat-approve setup/)
   assert.match(result.stdout, /wechat-approve install/)
+  assert.match(result.stdout, /wechat-approve rebind-link/)
 })

@@ -3,6 +3,7 @@ import path from "node:path"
 import { parse } from "jsonc-parser"
 import { isOwnedPluginSpec } from "./install.js"
 import { PluginInstanceRegistry } from "./plugin-instance.js"
+import { RebindPageStore, type RebindPageDescriptor } from "./rebind-page.js"
 import { processFingerprint } from "./runtime-lease.js"
 import { WeChatStore } from "./store.js"
 import { TransportHealthStatus } from "./transport-health.js"
@@ -76,6 +77,15 @@ export function resolveApprovalAgentNames(resolvedConfig: unknown): string[] {
   })
 }
 
+export function readCurrentRebindLink(
+  store: WeChatStore,
+  now: () => number = Date.now,
+): RebindPageDescriptor | null {
+  // CLI 只解析有效描述符和受控文件，不读取二维码正文。
+  const pages = new RebindPageStore({ directory: store.getDirectory(), now })
+  return pages.resolveLink(store.loadRebindState())
+}
+
 export async function doctorInstallation(options: {
   configFile: string
   stateDirectory: string
@@ -111,7 +121,10 @@ function readTransportCheck(store: WeChatStore, activeLeader: boolean, now: numb
     return readHealthyTransportCheck(health.lastSuccessAt, activeLeader, now)
   }
   if (health.status === TransportHealthStatus.NeedsRebind) {
-    return { ok: false, detail: "needs rebind; run wechat-approve bind" }
+    return {
+      ok: false,
+      detail: "needs rebind; run wechat-approve rebind-link or wechat-approve bind",
+    }
   }
   if (health.status === TransportHealthStatus.Degraded) {
     return readDegradedTransportCheck(store, health.lastFailureKind, health.nextRetryAt)

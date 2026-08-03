@@ -20,6 +20,7 @@ V1 是通知与审批插件，不是聊天机器人：普通微信消息不会�
 - 使用安装时确认的模型辅助解释复杂审批回复；模型不能调用工具或直接授权
 - outbox、轮询游标、去重记录、待审批和会话状态均可在重启后恢复
 - OpenCode 重启后自动探测微信传输；异常时退避重试，新绑定生效后无需再次重启
+- `prepare failed` 优先等待新消息自动刷新 context，无法恢复时提供一次性浏览器二维码链接
 - 最后一个 OpenCode 实例正常退出时发送停止通知，全部退出后不会残留常驻监控
 - 支持 Windows、macOS 和 Linux
 
@@ -142,17 +143,27 @@ npm exec --yes --package=@wekux/opencode-wechat-approve-plugin -- wechat-approve
 npm exec --yes --package=@wekux/opencode-wechat-approve-plugin -- wechat-approve bind
 ```
 
+如果 OpenCode 已提示生成一次性二维码页面，可自行复制或打开当前链接：
+
+```bash
+npm exec --yes --package=@wekux/opencode-wechat-approve-plugin -- wechat-approve rebind-link
+```
+
+插件不会自动打开浏览器，也不会新增 HTTP 监听端口。该命令只显示受控的本地
+`file://` 页面和过期时间；页面仅允许当前用户读写，绑定成功、过期或插件退出后
+会被删除。
+
 常见问题：
 
 | 现象 | 处理 |
 | --- | --- |
 | 多个实例没有通知 | 确认各 OpenCode 会话均加载相同 registry 插件规格，并运行上方的 `doctor` 命令检查实例和 Leader |
 | `doctor` 显示 `degraded` | 保持 OpenCode 运行，插件会按上限退避自动重试；检查网络和代理后再次运行 `doctor` |
-| `doctor` 显示 `needs rebind` | 运行上方的 `bind` 命令重新扫码并发送固定文本 `绑定`；新绑定会被运行中的 Leader 自动接管 |
+| `doctor` 显示 `needs rebind` | 先运行 `rebind-link` 查看插件生成的一次性浏览器链接；没有有效链接时运行 `bind`，扫码后发送固定文本 `绑定` |
 | `Model not found: opencode/...` | 运行上方的 `doctor` 命令，重新安装并选择 `opencode models` 中存在的完整 provider/model |
 | `微信 API 网络错误` | 根据提示中的安全错误码检查网络：`ENOTFOUND`/`EAI_AGAIN` 检查 DNS 或代理；`ECONNREFUSED`/`ENETUNREACH` 检查网络、防火墙或代理；超时检查网络质量和代理可达性 |
 | 能收到旧消息但收不到主动通知 | 运行上方的 `bind` 命令，向机器人发送一次固定文本 `绑定` |
-| `sendmessage` 返回 `prepare failed` | 先查看脱敏 `ret`、`errcode`、`errmsg`、`baseHost` 和 `contextAgeMs`；若为 `-14`，运行上方的 `bind` 命令重新扫码并发送 `绑定`；其他错误等待新入站 context 后由 outbox 重试 |
+| `sendmessage` 返回 `prepare failed` | 插件保留 outbox 并等待 60 秒：先向机器人发送一条私聊消息刷新 context；仍未恢复或错误为 `-14` 时，按 OpenCode Toast 中的 `file://` 链接扫码，或运行 `rebind-link`/`bind` |
 | 多项目重复通知 | 检查共享状态目录权限和 Leader 租约；实例事件通过 mailbox 去重，不需要 attach |
 | 微信回复“继续”没有反应 | 这是 V1 的预期行为；普通消息不会驱动 AI 会话 |
 
@@ -171,6 +182,8 @@ npm exec --yes --package=@wekux/opencode-wechat-approve-plugin -- wechat-approve
 ├── processed-messages.json
 ├── runtime.json
 ├── transport-health-v1.json  # 仅保存脱敏状态、失败类别和时间，不保存凭据
+├── rebind-v1.json            # 仅保存重绑阶段、过期时间和随机页面文件名
+├── rebind-pages/             # 临时二维码 HTML，成功、过期或退出后删除
 ├── shared-mailbox-v1.json
 ├── plugin-instances-v1.json
 ├── approval-index-v1.json

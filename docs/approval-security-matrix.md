@@ -24,7 +24,7 @@
 | REAL-13 | 多 pending | “全部拒绝” | 全部 reject，队列清空 | `integration.test.js` | `UNVERIFIED`；文字证据待真实线程 |
 | REAL-14 | 两个不同 createdAt | 乱序回复 | 按 createdAt/编号映射，不按 API 顺序 | `approval-manager.test.js` | `UNVERIFIED`；文字证据待真实线程 |
 | REAL-15 | 已有 session | busy/idle、失败、取消 | 分别只出现一次 Done、Error 或 Cancelled | `session-notifier.test.js` | `UNVERIFIED`；历史记录不构成当前 PASS，文字证据待真实线程 |
-| REAL-16 | 可控 transport 错误 | prepare failed、-14、刷新 context | 记录脱敏诊断；-14 要求重绑，其余只重发 outbox | `wechat-gateway.test.js` | `UNVERIFIED`；文字证据待真实线程 |
+| REAL-16 | 可控 transport 错误 | prepare failed、-14、刷新 context | 非 -14 在宽限期自修复；超时/-14 只生成一个受保护浏览器二维码；重绑后重放 outbox | `wechat-gateway.test.js`、`rebind-coordinator.test.js`、`transport-health-supervisor.test.js` | `UNVERIFIED`；链接、扫码和微信恢复文字待真实线程 |
 | REAL-17 | 有 outbox/已处理消息 | 重启、重复入站 | outbox 幂等重放一次，重复消息不重复通知 | `wechat-gateway.test.js` | `UNVERIFIED`；文字证据待真实线程 |
 | REAL-18 | 两个 OpenCode 目录 | 各创建一个审批/通知 | 目录、标题、Session ID 与 request ID 不串线 | `plugin.test.js` | `UNVERIFIED`；文字证据待真实线程 |
 

@@ -7,9 +7,12 @@ import test from "node:test"
 import {
   doctorInstallation,
   parseOpenCodePaths,
+  readCurrentRebindLink,
   resolveApprovalAgentNames,
   resolveEffectiveModel,
 } from "../dist/cli.js"
+import { RebindPageStore } from "../dist/rebind-page.js"
+import { RebindSchemaVersion, RebindStatus } from "../dist/rebind-state.js"
 import { PluginInstanceRegistry } from "../dist/plugin-instance.js"
 import {
   TransportFailureKind,
@@ -191,7 +194,36 @@ test("doctor requires bind after an expired WeChat session", async () => {
 
   assert.equal(result.binding.ok, true)
   assert.equal(result.transport.ok, false)
+  assert.match(result.transport.detail, /wechat-approve rebind-link/)
   assert.match(result.transport.detail, /needs rebind.*wechat-approve bind/)
+})
+
+test("reads only the current unexpired browser rebind link", async () => {
+  // CLI 读取受控描述符，不打印二维码原文或绑定凭据。
+  const root = mkdtempSync(join(tmpdir(), "wechat-cli-rebind-link-"))
+  const store = new WeChatStore(root)
+  const pages = new RebindPageStore({
+    directory: root,
+    now: () => 1_000,
+    randomID: () => "0123456789abcdef0123456789abcdef",
+    renderQRCode: async () => "<svg></svg>",
+  })
+  const page = await pages.create({ qrContent: "qr-secret", expiresAt: 61_000 })
+  store.saveRebindState({
+    schemaVersion: RebindSchemaVersion.V1,
+    status: RebindStatus.QrReady,
+    startedAt: 1_000,
+    expiresAt: 61_000,
+    pageFileName: page.fileName,
+    bindingGenerationDigest: "a".repeat(64),
+  })
+
+  const current = readCurrentRebindLink(store, () => 2_000)
+
+  assert.equal(current?.url, page.url)
+  assert.equal(current?.expiresAt, 61_000)
+  assert.doesNotMatch(JSON.stringify(current), /qr-secret|token|owner/)
+  assert.equal(readCurrentRebindLink(store, () => 62_000), null)
 })
 
 test("doctor reports redacted degraded transport recovery details", async () => {

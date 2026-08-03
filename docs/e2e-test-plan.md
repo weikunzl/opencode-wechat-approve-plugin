@@ -92,7 +92,7 @@ REAL-00 至 REAL-18 的逐项前置条件、操作、预期和证据规则见 [`
 | C：真实 OpenCode 有 1～2 个 pending | 发送批量、混合、序号和目标回复 | request ID、decision、pending 前后与微信文本一致 | 真实已验证主线；目标/竞态未验证 |
 | D：模型已配置且 deterministic 无法确定 | 发送明确目标 once、模糊/否定/疑问和非法模型输出 | 仅高置信度明确 once 可执行，其余澄清/拒绝 | fake model 全覆盖；真实仅明确 once |
 | E：未绑定、群聊、普通消息和第二实例 | 发送隔离消息、启动第二实例、检查权限 | 不建模型会话、不越权、不重复通知 | 自动化；真实未验证 |
-| F：transport 返回超时、-14 或 prepare failed | 刷新 context/rebind 后重试 outbox | -14 要求扫码，非 -14 只在新 context 后重发且无 token 日志 | 自动化已覆盖；真实恢复未验证 |
+| F：transport 返回超时、-14 或 prepare failed | 刷新 context/rebind 后重试 outbox | 非 -14 等待新 context 60 秒；超时或 -14 提供一次性 `file://` 二维码，恢复后只重发一次且无 token 日志 | 自动化已覆盖；真实恢复未验证 |
 
 ## 真实环境验收
 
@@ -117,4 +117,4 @@ OpenCode v1.18.7 的 agent 级 `*/*=allow` 仍覆盖项目 `bash=ask`，使 REAL
 
 ### `prepare failed` 处理记录
 
-先记录脱敏的 `ret`、`errcode`、`errmsg`、`baseHost`、账号摘要、目标摘要和 `contextAgeMs`，不要循环重试。`ret/errcode=-14` 表示 iLink 会话失效：插件清除旧 context、停止轮询，要求重新运行 `bind` 扫码并重启 `opencode web`。非 `-14` 的 `prepare failed` 保留 outbox；绑定用户发送一条新消息后，网关先保存消息携带的新 context，再尝试重发 outbox。该恢复路径已有内存回归测试，但仍需 live E2E 逐项观察微信文本。
+先记录脱敏的 `ret`、`errcode`、`errmsg`、`baseHost`、账号摘要、目标摘要和 `contextAgeMs`，不要循环重试。`ret/errcode=-14` 表示 iLink 会话失效：插件清除旧 context、停止普通轮询并生成一次性浏览器二维码页面。非 `-14` 的 `prepare failed` 保留 outbox；绑定用户在 60 秒内发送一条新消息后，网关先保存消息携带的新 context，再尝试重发 outbox；超时后自动升级到同一二维码流程。用户可运行 `wechat-approve rebind-link` 查看有效 `file://` 链接，无链接时回退到 `wechat-approve bind`。二维码成功、过期或进程退出后删除。自动化覆盖不能替代 live E2E 中的链接、扫码、绑定和微信原文。

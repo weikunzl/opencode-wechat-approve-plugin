@@ -101,7 +101,9 @@ an explicit user decision remains unverified in real OpenCode.
 
 If `sendmessage` reports `prepare failed`, record only the redacted `ret`,
 `errcode`, `errmsg`, `baseHost`, account/target summaries and context age. Do
-not retry indefinitely. Error `-14` invalidates the stored context and requires
-`npx @wekux/opencode-wechat-approve-plugin bind` with a new QR scan and the
-exact `绑定` message, then restart `opencode web`. For other errors, send one new private message to refresh
-the inbound context; the durable outbox is retried after that context is saved.
+not retry indefinitely. Error `-14` invalidates the stored context and starts
+the one-time browser QR flow. Open the `file://` link shown by OpenCode or run
+`wechat-approve rebind-link`, scan it and send the exact `绑定` message. For
+other errors, first send one new private message during the 60-second grace
+period; the durable outbox is retried after the new context is saved. A failed
+grace period escalates to the same browser QR flow without restarting OpenCode.

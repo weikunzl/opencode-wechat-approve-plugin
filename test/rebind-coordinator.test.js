@@ -148,6 +148,29 @@ test("allows transport verification after the new binding is committed", async (
   assert.equal(state.coordinator.requiresBinding(), false)
 })
 
+test("starts a fresh rebind when the committed binding is still expired", async () => {
+  const state = harness()
+  state.coordinator.request(TransportFailureKind.SessionExpired)
+  await flushAsync()
+
+  state.coordinator.request(TransportFailureKind.SessionExpired)
+  await flushAsync()
+
+  assert.equal(state.bindCalls.length, 2)
+  assert.equal(state.store.loadRebindState().status, RebindStatus.Confirming)
+})
+
+test("returns to the context grace period when the committed binding cannot send", async () => {
+  const state = harness()
+  state.coordinator.request(TransportFailureKind.SessionExpired)
+  await flushAsync()
+
+  state.coordinator.request(TransportFailureKind.ContextRefresh)
+
+  assert.equal(state.store.loadRebindState().status, RebindStatus.AwaitingContext)
+  assert.equal(state.bindCalls.length, 1)
+})
+
 test("expires and removes a QR page after binding fails without persisting secrets", async () => {
   const state = harness({ bindError: new Error("Bearer secret qr-secret") })
   state.coordinator.request(TransportFailureKind.SessionExpired)

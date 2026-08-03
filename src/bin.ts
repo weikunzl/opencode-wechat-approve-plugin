@@ -11,6 +11,7 @@ import qrcode from "qrcode-terminal"
 import {
   doctorInstallation,
   parseOpenCodePaths,
+  readCurrentRebindLink,
   resolveApprovalAgentNames,
   resolveEffectiveModel,
 } from "./cli.js"
@@ -28,6 +29,7 @@ enum CliCommand {
   Install = "install",
   Bind = "bind",
   Doctor = "doctor",
+  RebindLink = "rebind-link",
   Help = "help",
   LongHelp = "--help",
   ShortHelp = "-h",
@@ -45,6 +47,10 @@ async function main(args: string[]): Promise<number> {
   const configDirectory = paths.config
   const configFile = findConfigFile(configDirectory)
   const stateDirectory = path.join(paths.home || path.dirname(paths.config), ".opencode", "wechat-approve")
+  const store = new WeChatStore(stateDirectory)
+
+  if (command === CliCommand.RebindLink) return printRebindLink(store)
+
   const availableModels = lines(await runOpenCode(["models"]))
 
   if (command === CliCommand.Doctor) {
@@ -59,7 +65,6 @@ async function main(args: string[]): Promise<number> {
     return Object.values(result).every((check) => check.ok) ? 0 : 1
   }
 
-  const store = new WeChatStore(stateDirectory)
   const gateway = new WeChatGateway(store, new IlinkClientTransport(store))
   if (command === CliCommand.Bind) {
     await bind(gateway, true)
@@ -115,6 +120,18 @@ function parseCommand(args: string[]): CliCommand {
 function isHelpCommand(command: CliCommand): boolean {
   // 将三种帮助写法归为同一只读分支。
   return [CliCommand.Help, CliCommand.LongHelp, CliCommand.ShortHelp].includes(command)
+}
+
+function printRebindLink(store: WeChatStore): number {
+  // 仅输出一次性本地链接和过期时间，不读取页面或二维码正文。
+  const page = readCurrentRebindLink(store)
+  if (!page) {
+    process.stderr.write("当前没有有效的重绑链接，请运行 wechat-approve bind。\n")
+    return 1
+  }
+  process.stdout.write(`${page.url}\n`)
+  process.stdout.write(`过期时间：${new Date(page.expiresAt).toISOString()}\n`)
+  return 0
 }
 
 async function bind(gateway: WeChatGateway, force = false): Promise<void> {
@@ -192,6 +209,7 @@ function printHelp(): void {
       "wechat-approve setup     首次配置插件、确认模型并扫码绑定",
       "wechat-approve install   setup 的兼容别名",
       "wechat-approve bind      重新扫码或补充绑定消息",
+      "wechat-approve rebind-link 查看当前一次性浏览器重绑链接",
       "wechat-approve doctor    检查插件、模型、绑定和共享运行时",
       "",
     ].join("\n"),

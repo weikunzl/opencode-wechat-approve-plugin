@@ -127,7 +127,7 @@ export class RebindCoordinator implements RebindRecovery {
 
   private awaitContext(): void {
     // 相同绑定代次只建立一个宽限期，避免重复 Toast 和二维码。
-    const current = this.options.store.loadRebindState()
+    const current = this.resetConfirmedAttempt()
     if (current.status !== RebindStatus.Idle) return
     const startedAt = this.now()
     this.saveState(RebindStatus.AwaitingContext, startedAt, startedAt + this.contextGraceMs)
@@ -139,7 +139,7 @@ export class RebindCoordinator implements RebindRecovery {
     // -14 跳过宽限，同一进行中任务不会重复启动。
     this.clearGrace()
     if (this.operation) return
-    const current = this.options.store.loadRebindState()
+    const current = this.resetConfirmedAttempt()
     if ([RebindStatus.QrReady, RebindStatus.Confirming].includes(current.status)) return
     this.saveState(RebindStatus.AwaitingContext, this.now(), this.now())
     this.launch()
@@ -217,6 +217,15 @@ export class RebindCoordinator implements RebindRecovery {
 
   private startedAt(): number {
     return this.options.store.loadRebindState().startedAt ?? this.now()
+  }
+
+  private resetConfirmedAttempt(): RebindState {
+    // 已提交但探测失败的绑定必须开始新流程，旧二维码不可复用。
+    const current = this.options.store.loadRebindState()
+    if (current.status !== RebindStatus.Confirming) return current
+    this.options.pages.removeCurrent(current)
+    this.options.store.clearRebindState()
+    return this.options.store.loadRebindState()
   }
 
   private clearGrace(): void {
