@@ -8,6 +8,11 @@ import {
   isTransportHealthState,
   type TransportHealthState,
 } from "./transport-health.js"
+import {
+  defaultRebindState,
+  isRebindState,
+  type RebindState,
+} from "./rebind-state.js"
 import type { AccountData } from "./types.js"
 
 export const WECHAT_DATA_DIR_NAME = "wechat-approve"
@@ -191,6 +196,22 @@ export class WeChatStore {
   saveTransportHealth(state: TransportHealthState): void {
     // 健康文件只包含枚举、计数和时间，不得写入凭据。
     this.atomicWrite("transport-health-v1.json", state)
+  }
+
+  loadRebindState(): RebindState {
+    // 恢复描述符不包含二维码或凭据，损坏时回退为空闲状态。
+    return this.readJSON("rebind-v1.json", defaultRebindState(), isRebindState)
+  }
+
+  saveRebindState(state: RebindState): void {
+    // 只允许通过类型守卫的受控描述符进入共享状态目录。
+    if (!isRebindState(state)) throw new Error("微信重绑状态无效")
+    this.atomicWrite("rebind-v1.json", state)
+  }
+
+  clearRebindState(): void {
+    // 空闲状态无需持久化，删除描述符即可。
+    this.remove("rebind-v1.json")
   }
 
   migrateLegacyState(): void {
