@@ -139,6 +139,15 @@ test("removes the QR page only after transport becomes healthy", async () => {
   assert.equal(state.notices.at(-1).variant, "success")
 })
 
+test("allows transport verification after the new binding is committed", async () => {
+  const state = harness()
+  state.coordinator.request(TransportFailureKind.SessionExpired)
+  await flushAsync()
+
+  assert.equal(state.store.loadRebindState().status, RebindStatus.Confirming)
+  assert.equal(state.coordinator.requiresBinding(), false)
+})
+
 test("expires and removes a QR page after binding fails without persisting secrets", async () => {
   const state = harness({ bindError: new Error("Bearer secret qr-secret") })
   state.coordinator.request(TransportFailureKind.SessionExpired)

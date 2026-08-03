@@ -3,6 +3,7 @@ import type { OpencodeClient } from "@opencode-ai/sdk"
 export interface OpenCodeClient {
   postSessionIdPermissionsPermissionId: OpencodeClient["postSessionIdPermissionsPermissionId"]
   session?: OpencodeClient["session"]
+  tui?: Pick<OpencodeClient["tui"], "showToast">
 }
 
 export interface OpenCodeEventLike {

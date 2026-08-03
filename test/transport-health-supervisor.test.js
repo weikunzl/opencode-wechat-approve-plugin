@@ -37,6 +37,16 @@ function harness(options = {}) {
   const notifications = []
   let interval
   let errorHandler = () => {}
+  const rebindRequests = []
+  const rebindCalls = []
+  const rebind = {
+    activate: () => rebindCalls.push("activate"),
+    request: (failure) => rebindRequests.push(failure),
+    observeBindingChange: () => rebindCalls.push("observe"),
+    markTransportHealthy: () => rebindCalls.push("healthy"),
+    requiresBinding: () => options.requiresBinding ?? false,
+    stop: async () => rebindCalls.push("stop"),
+  }
   const gateway = {
     initialize: async () => options.initialize?.() ?? "ready",
     start: () => calls.push("start"),
@@ -72,7 +82,10 @@ function harness(options = {}) {
         ...options.timers,
       },
       shutdownTimeoutMs: options.shutdownTimeoutMs,
+      ...(options.withRebind ? { rebind } : {}),
     }),
+    rebindCalls,
+    rebindRequests,
     emitError: (error) => errorHandler(error),
     runMonitor: async () => {
       interval()
@@ -102,6 +115,51 @@ test("keeps polling active when the startup probe has a transient failure", asyn
     state.store.loadTransportHealth().lastFailureKind,
     TransportFailureKind.Network,
   )
+})
+
+test("delegates context refresh failures without scheduling stale probes", async () => {
+  const state = harness({
+    withRebind: true,
+    probeError: new IlinkApiError({
+      endpoint: "/ilink/bot/sendmessage",
+      ret: -2,
+      errmsg: "prepare failed",
+    }),
+  })
+
+  await state.supervisor.start(async () => {})
+
+  assert.deepEqual(state.rebindRequests, [TransportFailureKind.ContextRefresh])
+  assert.equal(state.store.loadTransportHealth().nextRetryAt, null)
+  assert.deepEqual(state.rebindCalls, ["activate"])
+})
+
+test("cleans the rebind page only after a successful transport probe", async () => {
+  const state = harness({ withRebind: true })
+
+  await state.supervisor.start(async () => {})
+
+  assert.deepEqual(state.rebindCalls, ["activate", "healthy"])
+})
+
+test("observes a fresh context before recovering degraded transport", async () => {
+  const state = harness({ withRebind: true })
+  await state.supervisor.start(async () => {})
+  state.store.saveTransportHealth({
+    ...state.store.loadTransportHealth(),
+    status: TransportHealthStatus.Degraded,
+    lastFailureKind: TransportFailureKind.ContextRefresh,
+  })
+  state.store.saveContext({
+    boundUserID: "owner",
+    contextToken: "fresh-context",
+    updatedAt: 2_000_001,
+  })
+
+  await state.runMonitor()
+
+  assert.equal(state.rebindCalls.includes("observe"), true)
+  assert.equal(state.store.loadTransportHealth().status, TransportHealthStatus.Healthy)
 })
 
 test("uses a distinct message when taking over gateway leadership", async () => {

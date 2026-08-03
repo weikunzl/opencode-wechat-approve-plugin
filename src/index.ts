@@ -12,9 +12,12 @@ import { normalizeOpenCodeEvent } from "./event-normalizer.js"
 import { NormalizedEventKind } from "./plugin-types.js"
 import { GatewayLeader } from "./gateway-leader.js"
 import { PluginEventRouter } from "./plugin-event-router.js"
+import type { OpenCodeClient } from "./plugin-types.js"
 import { PluginInstanceRegistry } from "./plugin-instance.js"
 import { SharedMailbox } from "./shared-mailbox.js"
 import { RuntimeLease } from "./runtime-lease.js"
+import { RebindCoordinator, type RebindNotice } from "./rebind-coordinator.js"
+import { RebindPageStore } from "./rebind-page.js"
 import { SessionNotifier } from "./session-notifier.js"
 import { WeChatStore } from "./store.js"
 import { TransportHealthSupervisor } from "./transport-health-supervisor.js"
@@ -94,6 +97,21 @@ interface RuntimeTimers {
 
 enum RuntimeTiming {
   InstanceHeartbeatMs = 10_000,
+  ToastDurationMs = 15_000,
+}
+
+export function createRebindNotifier(
+  client: OpenCodeClient,
+  directory: string,
+): (notice: RebindNotice) => Promise<void> {
+  // OpenCode 不支持嵌入二维码，只显示用户可自行打开的本地链接。
+  return async (notice) => {
+    if (!client.tui) return
+    await client.tui.showToast({
+      body: { ...notice, duration: RuntimeTiming.ToastDurationMs },
+      query: { directory },
+    })
+  }
 }
 
 export function createPluginRuntime(dependencies: {
@@ -354,7 +372,13 @@ export const WeChatPlugin: Plugin = async (input) => {
   const internalSessions = new InternalSessionRegistry()
 
   const gateway = new WeChatGateway(store, new IlinkClientTransport(store))
-  const supervisor = new TransportHealthSupervisor({ store, gateway })
+  const rebind = new RebindCoordinator({
+    store,
+    gateway,
+    pages: new RebindPageStore({ directory: store.getDirectory() }),
+    notify: createRebindNotifier(input.client, input.directory),
+  })
+  const supervisor = new TransportHealthSupervisor({ store, gateway, rebind })
   const leader = new GatewayLeader({
     gateway,
     mailbox,

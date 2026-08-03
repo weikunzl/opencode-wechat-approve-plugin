@@ -5,7 +5,7 @@ import { join } from "node:path"
 import test from "node:test"
 
 import { ApprovalManager } from "../dist/approval-manager.js"
-import { createPluginRuntime } from "../dist/index.js"
+import { createPluginRuntime, createRebindNotifier } from "../dist/index.js"
 import { PluginEventRouter } from "../dist/plugin-event-router.js"
 import { SharedMailbox } from "../dist/shared-mailbox.js"
 import { WeChatStore } from "../dist/store.js"
@@ -64,6 +64,30 @@ test("ordinary WeChat text never invokes approval model or emits a notification"
 
   assert.deepEqual(modelCalls, [])
   assert.deepEqual(gateway.sent, [])
+})
+
+test("publishes a browser rebind link through the injected OpenCode TUI", async () => {
+  // 插件只把受控通知交给当前 OpenCode TUI，不自行打开浏览器。
+  const toasts = []
+  const notify = createRebindNotifier({
+    tui: { showToast: async (input) => toasts.push(input) },
+  }, "/workspace")
+
+  await notify({
+    title: "微信需要重新绑定",
+    message: "file:///private/rebind.html",
+    variant: "warning",
+  })
+
+  assert.deepEqual(toasts, [{
+    body: {
+      title: "微信需要重新绑定",
+      message: "file:///private/rebind.html",
+      variant: "warning",
+      duration: 15_000,
+    },
+    query: { directory: "/workspace" },
+  }])
 })
 
 test("exposes no general-purpose WeChat AI tools or permission interception hook", () => {

@@ -1,5 +1,6 @@
 import { isSessionTimeoutError, requiresContextRefresh } from "./client.js"
 import type { NotificationEnvelope } from "./domain.js"
+import type { RebindRecovery } from "./rebind-coordinator.js"
 import { WeChatStore } from "./store.js"
 import {
   TransportFailureKind,
@@ -44,6 +45,7 @@ interface TransportHealthSupervisorOptions {
   now?: () => number
   timers?: Partial<SupervisorTimers>
   shutdownTimeoutMs?: number
+  rebind?: RebindRecovery
 }
 
 interface SupervisorTimers {
@@ -83,6 +85,7 @@ export class TransportHealthSupervisor {
     reason = TransportStartReason.Restart,
   ): Promise<void> {
     // 先保留上次状态用于判断，再标记本次启动尚未正常关闭。
+    this.options.rebind?.activate()
     const previous = this.options.store.loadTransportHealth()
     const lifecycle = ++this.lifecycle
     this.running = true
@@ -102,6 +105,7 @@ export class TransportHealthSupervisor {
     if ((await this.options.gateway.initialize()) !== "ready") {
       if (!this.isCurrent(lifecycle)) return
       this.markNeedsRebind()
+      this.options.rebind?.request(TransportFailureKind.SessionExpired)
       return
     }
     if (!this.isCurrent(lifecycle)) return
@@ -117,6 +121,7 @@ export class TransportHealthSupervisor {
     this.lifecycle += 1
     this.operationController?.abort()
     this.stopMonitor()
+    await this.options.rebind?.stop()
     await this.recovery?.catch(() => {})
     if (options.sendNotice && this.isHealthy()) await this.sendStopNotice()
     this.options.gateway.setTransportErrorHandler?.(null)
@@ -136,7 +141,7 @@ export class TransportHealthSupervisor {
     } catch (error) {
       if (controller.signal.aborted) return
       this.markFailure(error)
-      if (isSessionTimeoutError(rootCause(error))) {
+      if (isSessionTimeoutError(rootCause(error)) && !this.options.rebind) {
         this.options.store.invalidateContext()
         await this.options.gateway.stop()
       }
@@ -150,6 +155,11 @@ export class TransportHealthSupervisor {
     if (!this.running || this.recovery) return
     const state = this.options.store.loadTransportHealth()
     const changed = state.bindingGenerationDigest !== this.bindingDigest()
+    if (changed) this.options.rebind?.observeBindingChange()
+    if (this.options.rebind?.requiresBinding()) {
+      this.markNeedsRebind(state.lastFailureKind ?? TransportFailureKind.SessionExpired)
+      return
+    }
     if (changed && state.status === TransportHealthStatus.Healthy) {
       this.markBindingObserved(state)
       return
@@ -231,16 +241,19 @@ export class TransportHealthSupervisor {
       nextRetryAt: null,
       bindingGenerationDigest: this.bindingDigest(),
     })
+    this.options.rebind?.markTransportHealthy()
   }
 
-  private markNeedsRebind(): void {
+  private markNeedsRebind(
+    failure = TransportFailureKind.SessionExpired,
+  ): void {
     // 本地绑定不完整时保留监督器状态，等待新的原子绑定代次。
     const current = this.options.store.loadTransportHealth()
     this.options.store.saveTransportHealth({
       ...current,
       status: TransportHealthStatus.NeedsRebind,
       lastFailureAt: this.now(),
-      lastFailureKind: TransportFailureKind.SessionExpired,
+      lastFailureKind: failure,
     })
   }
 
@@ -258,6 +271,7 @@ export class TransportHealthSupervisor {
     const current = this.options.store.loadTransportHealth()
     const failure = classifyFailure(error)
     const failures = current.consecutiveFailures + 1
+    this.options.rebind?.request(failure)
     this.options.store.saveTransportHealth({
       ...current,
       status: failure === TransportFailureKind.SessionExpired
@@ -267,7 +281,7 @@ export class TransportHealthSupervisor {
       lastFailureAt: this.now(),
       lastFailureKind: failure,
       consecutiveFailures: failures,
-      nextRetryAt: this.now() + retryDelay(failures),
+      nextRetryAt: retryTimestamp(failure, failures, this.now()),
     })
   }
 
@@ -401,6 +415,18 @@ function retryDelay(failures: number): number {
     HealthTiming.RetryMaximumMs,
     HealthTiming.RetryBaseMs * 2 ** Math.min(failures - 1, 10),
   )
+}
+
+function retryTimestamp(
+  failure: TransportFailureKind,
+  failures: number,
+  now: number,
+): number | null {
+  // context 和会话错误由协调器处理，只有网络类失败主动重试发送。
+  if ([TransportFailureKind.ContextRefresh, TransportFailureKind.SessionExpired].includes(failure)) {
+    return null
+  }
+  return now + retryDelay(failures)
 }
 
 function retryIsDue(state: TransportHealthState, now: number): boolean {

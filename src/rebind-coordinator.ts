@@ -112,7 +112,7 @@ export class RebindCoordinator implements RebindRecovery {
 
   requiresBinding(): boolean {
     const status = this.options.store.loadRebindState().status
-    return [RebindStatus.QrReady, RebindStatus.Confirming, RebindStatus.Expired].includes(status)
+    return [RebindStatus.QrReady, RebindStatus.Expired].includes(status)
   }
 
   async stop(): Promise<void> {
