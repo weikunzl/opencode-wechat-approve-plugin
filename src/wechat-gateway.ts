@@ -22,7 +22,11 @@ export interface SendTextInput {
 }
 
 export interface IlinkTransport {
-  login(onQRCode?: (value: string) => void, force?: boolean): Promise<AccountData>
+  login(
+    onQRCode?: (value: string) => void | Promise<void>,
+    force?: boolean,
+    signal?: AbortSignal,
+  ): Promise<AccountData>
   poll(cursor: string, signal?: AbortSignal): Promise<GetUpdatesResponse>
   sendText(input: SendTextInput): Promise<void>
 }
@@ -47,46 +51,44 @@ export class WeChatGateway {
     return this.store.loadAccount() && this.store.loadContext() ? "ready" : "needs-binding"
   }
 
-  async bind(onQRCode?: (value: string) => void, force = false): Promise<void> {
+  async bind(
+    onQRCode?: (value: string) => void | Promise<void>,
+    force = false,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    // 强制重绑必须响应 Leader 生命周期取消，旧绑定在提交前保持不变。
+    signal?.throwIfAborted()
     if (!force && this.store.loadAccount() && this.store.loadContext()) return
-    const account = await this.transport.login(onQRCode, force)
+    const account = await this.transport.login(onQRCode, force, signal)
     if (!account.userId) throw new Error("微信登录响应缺少用户标识")
-    let cursor = force ? "" : this.store.loadCursor()
+    await this.waitForBinding({ account, cursor: force ? "" : this.store.loadCursor(), signal })
+  }
 
+  private async waitForBinding(input: BindingWaitInput): Promise<void> {
+    // 只接受新登录账号私聊中的精确“绑定”消息。
+    let cursor = input.cursor
     while (true) {
-      const response = await this.transport.poll(cursor)
-      if (response.ret !== undefined && response.ret !== 0) {
-        throw new Error(`微信轮询失败: ${response.errmsg || response.ret}`)
-      }
-      if (typeof response.get_updates_buf === "string") {
-        cursor = response.get_updates_buf
-      }
-
-      for (const raw of response.msgs ?? []) {
-        const parsed = parseInbound(raw)
-        if (
-          !parsed ||
-          parsed.group ||
-          parsed.message.senderID !== account.userId ||
-          normalize(parsed.message.text) !== "绑定"
-        ) {
-          continue
-        }
-        if (!parsed.contextToken) throw new Error("绑定消息缺少上下文令牌")
-        this.store.commitBinding(
-          account,
-          {
-            boundUserID: account.userId,
-            contextToken: parsed.contextToken,
-            updatedAt: parsed.message.receivedAt,
-          },
-          cursor,
-        )
-        this.seen.add(parsed.message.messageID)
-        this.store.saveProcessedMessageIDs([...this.seen])
-        return
-      }
+      input.signal?.throwIfAborted()
+      const response = await this.transport.poll(cursor, input.signal)
+      assertSuccessfulPoll(response)
+      cursor = typeof response.get_updates_buf === "string" ? response.get_updates_buf : cursor
+      const binding = findBindingMessage(response, input.account.userId!)
+      if (!binding) continue
+      this.commitBinding(input.account, binding, cursor)
+      return
     }
+  }
+
+  private commitBinding(account: AccountData, binding: ParsedInbound, cursor: string): void {
+    // 账号、上下文和 cursor 原子提交后才记录消息幂等状态。
+    if (!binding.contextToken) throw new Error("绑定消息缺少上下文令牌")
+    this.store.commitBinding(account, {
+      boundUserID: account.userId!,
+      contextToken: binding.contextToken,
+      updatedAt: binding.message.receivedAt,
+    }, cursor)
+    this.seen.add(binding.message.messageID)
+    this.store.saveProcessedMessageIDs([...this.seen])
   }
 
   start(onMessage: (message: InboundApprovalMessage) => Promise<void>): void {
@@ -263,6 +265,30 @@ export class WeChatGateway {
     this.retryContextGeneration = null
     return true
   }
+}
+
+interface BindingWaitInput {
+  account: AccountData
+  cursor: string
+  signal?: AbortSignal
+}
+
+type ParsedInbound = NonNullable<ReturnType<typeof parseInbound>>
+
+function assertSuccessfulPoll(response: GetUpdatesResponse): void {
+  if (response.ret !== undefined && response.ret !== 0) {
+    throw new Error(`微信轮询失败: ${response.errmsg || response.ret}`)
+  }
+}
+
+function findBindingMessage(response: GetUpdatesResponse, ownerID: string): ParsedInbound | null {
+  // 群聊、其他账号和非精确绑定文本都不能更新绑定。
+  for (const raw of response.msgs ?? []) {
+    const parsed = parseInbound(raw)
+    if (!parsed || parsed.group || parsed.message.senderID !== ownerID) continue
+    if (normalize(parsed.message.text) === "绑定") return parsed
+  }
+  return null
 }
 
 function bindingGeneration(store: WeChatStore): string {

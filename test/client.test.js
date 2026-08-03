@@ -239,6 +239,57 @@ test("uses a forced login account before its binding is committed", async () => 
   ])
 })
 
+test("awaits asynchronous QR publication before polling login status", async () => {
+  // 页面尚未写完就轮询会让用户拿不到当前二维码链接。
+  const store = new WeChatStore(mkdtempSync(join(tmpdir(), "wechat-client-qr-page-")))
+  const order = []
+  const transport = new IlinkClientTransport(store, async (url) => {
+    if (String(url).includes("get_bot_qrcode")) {
+      return Response.json({ qrcode: "qr", qrcode_img_content: "qr-content" })
+    }
+    order.push("status")
+    return Response.json({
+      status: "confirmed",
+      ilink_bot_id: "new-bot",
+      bot_token: "new-token",
+      baseurl: "https://new.example.invalid",
+      ilink_user_id: "owner",
+    })
+  })
+
+  await transport.login(async () => {
+    await new Promise((resolve) => setImmediate(resolve))
+    order.push("page")
+  }, true)
+  await new Promise((resolve) => setImmediate(resolve))
+
+  assert.deepEqual(order, ["page", "status"])
+})
+
+test("aborts QR login while waiting for confirmation", async () => {
+  // OpenCode 退出后登录请求必须随协调器取消，不能继续持有旧页面。
+  const store = new WeChatStore(mkdtempSync(join(tmpdir(), "wechat-client-qr-abort-")))
+  const controller = new AbortController()
+  const transport = new IlinkClientTransport(store, async (url, init) => {
+    if (String(url).includes("get_bot_qrcode")) {
+      return Response.json({ qrcode: "qr", qrcode_img_content: "qr-content" })
+    }
+    return new Promise((_resolve, reject) => {
+      init.signal.addEventListener("abort", () => reject(init.signal.reason), { once: true })
+    })
+  })
+  const outcome = transport.login(undefined, true, controller.signal)
+    .then(() => "resolved", (error) => error.name)
+
+  controller.abort()
+  const result = await Promise.race([
+    outcome,
+    new Promise((resolve) => setTimeout(() => resolve("not-aborted"), 30)),
+  ])
+
+  assert.equal(result, "AbortError")
+})
+
 test("continues QR status polling after a transient timeout", async () => {
   const store = new WeChatStore(mkdtempSync(join(tmpdir(), "wechat-client-")))
   let statusCalls = 0

@@ -555,3 +555,37 @@ test("an interrupted forced rebind preserves the previous binding and uses a fre
   assert.equal(store.loadContext().boundUserID, "owner@im.wechat")
   assert.equal(store.loadCursor(), "old-cursor")
 })
+
+test("forwards cancellation to a forced rebind", async () => {
+  // Leader 释放时必须能取消 transport 登录和后续绑定轮询。
+  const { store } = harness()
+  const controller = new AbortController()
+  let receivedSignal
+  const gateway = new WeChatGateway(store, {
+    login: async (_onQRCode, _force, signal) => {
+      receivedSignal = signal
+      return {
+        accountId: "new-bot",
+        token: "new-secret",
+        baseUrl: "https://example.invalid",
+        userId: "new-owner@im.wechat",
+        savedAt: "2026-08-03T00:00:00.000Z",
+      }
+    },
+    poll: async () => ({
+      ret: 0,
+      get_updates_buf: "new-cursor",
+      msgs: [privateText({
+        senderID: "new-owner@im.wechat",
+        text: "绑定",
+        id: "new-binding",
+        token: "new-context",
+      })],
+    }),
+    sendText: async () => {},
+  })
+
+  await gateway.bind(undefined, true, controller.signal)
+
+  assert.equal(receivedSignal, controller.signal)
+})

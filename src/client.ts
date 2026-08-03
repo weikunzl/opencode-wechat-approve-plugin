@@ -122,50 +122,57 @@ export class IlinkClientTransport implements IlinkTransport {
     private readonly fetcher: typeof fetch = fetch,
   ) {}
 
-  async login(onQRCode?: (value: string) => void, force = false): Promise<AccountData> {
+  async login(
+    onQRCode?: (value: string) => void | Promise<void>,
+    force = false,
+    signal?: AbortSignal,
+  ): Promise<AccountData> {
+    // 二维码发布和状态轮询共享取消信号，插件退出后不残留登录任务。
+    signal?.throwIfAborted()
     const storedAccount = this.store.loadAccount()
     if (storedAccount && !force) return storedAccount
+    const qr = await this.requestQRCode(signal)
+    await onQRCode?.(qr.qrcode_img_content)
+    return this.waitForLogin(qr.qrcode, signal)
+  }
 
+  private async requestQRCode(signal?: AbortSignal): Promise<Required<QRCodeResponse>> {
+    // 二维码标识和可渲染内容必须同时存在。
     const response = await this.fetchJSON(
       `${ILINK_BASE}/ilink/bot/get_bot_qrcode?bot_type=${encodeURIComponent(BOT_TYPE)}`,
-    )
-    const qr = response as QRCodeResponse
-    if (!qr.qrcode || !qr.qrcode_img_content) throw new Error("微信二维码响应无效")
-    onQRCode?.(qr.qrcode_img_content)
+      signal,
+    ) as QRCodeResponse
+    if (!response.qrcode || !response.qrcode_img_content) throw new Error("微信二维码响应无效")
+    return { qrcode: response.qrcode, qrcode_img_content: response.qrcode_img_content }
+  }
 
+  private async waitForLogin(qrcode: string, signal?: AbortSignal): Promise<AccountData> {
+    // 二维码有效期内轮询确认，超时后停止使用本次标识。
     const deadline = Date.now() + 480_000
     while (Date.now() < deadline) {
-      const status = await this.fetchQRCodeStatus(qr.qrcode)
-      if (!status) {
-        await sleep(1_000)
-        continue
-      }
-      if (status.status === "expired") throw new Error("微信二维码已过期")
-      if (status.status === "confirmed") {
-        if (!status.ilink_bot_id || !status.bot_token || !status.ilink_user_id) {
-          throw new Error("微信登录确认响应缺少账号、令牌或用户标识")
-        }
-        this.pendingLoginAccount = {
-          token: status.bot_token,
-          baseUrl: status.baseurl || ILINK_BASE,
-          accountId: status.ilink_bot_id,
-          userId: status.ilink_user_id,
-          savedAt: new Date().toISOString(),
-        }
-        return this.pendingLoginAccount
-      }
-      await sleep(1_000)
+      signal?.throwIfAborted()
+      const account = confirmedAccount(await this.fetchQRCodeStatus(qrcode, signal))
+      if (account) return this.rememberPendingAccount(account)
+      await sleep(1_000, signal)
     }
     throw new Error("微信二维码登录超时")
   }
 
-  private async fetchQRCodeStatus(qrcode: string): Promise<QRCodeStatus | null> {
+  private rememberPendingAccount(account: AccountData): AccountData {
+    // 强制登录账号仅在新绑定原子提交前临时用于 poll。
+    this.pendingLoginAccount = account
+    return account
+  }
+
+  private async fetchQRCodeStatus(qrcode: string, signal?: AbortSignal): Promise<QRCodeStatus | null> {
     // 状态长轮询的单次网络超时只代表暂时无响应，继续等待二维码有效期。
     try {
       return (await this.fetchJSON(
         `${ILINK_BASE}/ilink/bot/get_qrcode_status?qrcode=${encodeURIComponent(qrcode)}`,
+        signal,
       )) as QRCodeStatus
     } catch (error) {
+      if (signal?.aborted) throw signal.reason
       if (isTimeout(error)) return null
       throw error
     }
@@ -259,12 +266,12 @@ export class IlinkClientTransport implements IlinkTransport {
     return parsed
   }
 
-  private async fetchJSON(url: string): Promise<unknown> {
+  private async fetchJSON(url: string, signal?: AbortSignal): Promise<unknown> {
     const target = new URL(url)
     const response = await this.request({
       endpoint: target.pathname,
       url: target,
-      init: { signal: AbortSignal.timeout(15_000) },
+      init: { signal: withTimeout(signal, 15_000) },
     })
     if (!response.ok) throw new Error(`微信 API 请求失败: HTTP ${response.status}`)
     return response.json()
@@ -275,9 +282,27 @@ export class IlinkClientTransport implements IlinkTransport {
     try {
       return await this.fetcher(options.url, options.init)
     } catch (error) {
+      if (options.init.signal?.aborted) throw options.init.signal.reason
       if (error instanceof IlinkNetworkError) throw error
       throw new IlinkNetworkError(options.endpoint, error)
     }
+  }
+}
+
+function confirmedAccount(status: QRCodeStatus | null): AccountData | null {
+  // 只有 confirmed 响应能产生临时账号，过期状态立即失败。
+  if (!status) return null
+  if (status.status === "expired") throw new Error("微信二维码已过期")
+  if (status.status !== "confirmed") return null
+  if (!status.ilink_bot_id || !status.bot_token || !status.ilink_user_id) {
+    throw new Error("微信登录确认响应缺少账号、令牌或用户标识")
+  }
+  return {
+    token: status.bot_token,
+    baseUrl: status.baseurl || ILINK_BASE,
+    accountId: status.ilink_bot_id,
+    userId: status.ilink_user_id,
+    savedAt: new Date().toISOString(),
   }
 }
 
@@ -295,8 +320,22 @@ function isTimeout(error: unknown): boolean {
   return error instanceof Error && (error.name === "AbortError" || error.name === "TimeoutError")
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms))
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  // 登录等待使用可取消定时器，停止插件后立即释放流程。
+  if (signal?.aborted) return Promise.reject(signal.reason)
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(resolve, ms)
+    signal?.addEventListener("abort", () => {
+      clearTimeout(timer)
+      reject(signal.reason)
+    }, { once: true })
+  })
+}
+
+function withTimeout(signal: AbortSignal | undefined, timeoutMs: number): AbortSignal {
+  // 调用方取消与网络超时任一到达都应终止请求。
+  const timeout = AbortSignal.timeout(timeoutMs)
+  return signal ? AbortSignal.any([signal, timeout]) : timeout
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
