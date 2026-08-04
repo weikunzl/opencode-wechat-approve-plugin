@@ -2,6 +2,7 @@ import path from "node:path"
 import { interpretDeterministic, parseApprovalDecision } from "./approval-intent.js"
 import type { ApprovalConversation, NotificationEnvelope, PendingApproval } from "./domain.js"
 import type { ApprovalIntent } from "./model-interpreter.js"
+import { approvalNotificationID } from "./notification-utils.js"
 import type { PermissionAPI } from "./opencode-permissions.js"
 import { formatStatusMessage } from "./status-message.js"
 import { WeChatStore } from "./store.js"
@@ -53,23 +54,25 @@ export class ApprovalManager {
     this.now = options.now ?? Date.now
   }
 
+  async prepareStartup(): Promise<void> {
+    // transport 启动前以权威快照裁剪本地审批和历史 outbox。
+    const active = this.activeApprovals(await this.api.list())
+    this.store.savePendingApprovals(active)
+    this.store.retainCurrentApprovalNotifications(active)
+    if (active.length === 0) this.store.saveConversation(null)
+  }
+
   async reconcile(isActive: () => boolean = alwaysActive): Promise<NotificationEnvelope[]> {
     const before = this.store.loadPendingApprovals()
     const current = await this.listForReconcile()
     if (current === null) return [this.syncUnavailableNotice()]
     if (!isActive()) return []
-    this.store.savePendingApprovals(current)
+    const active = this.activeApprovals(current)
+    this.store.savePendingApprovals(active)
 
-    const removed = before.filter((item) => !current.some((candidate) => candidate.requestID === item.requestID))
+    const removed = this.removedActiveApprovals(before, active)
     if (removed.length === 0) return []
-    return [
-      this.notice(
-        `approval-reconciled:${removed.map((item) => item.requestID).join(",")}`,
-        "approval-result",
-        "warning",
-        `[Approval updated]\n${removed.length} 个请求已在 OpenCode 中处理或失效。`,
-      ),
-    ]
+    return [this.reconciledNotice(removed)]
   }
 
   async onPermissionAsked(event: PermissionAskedEvent): Promise<NotificationEnvelope[]> {
@@ -93,7 +96,7 @@ export class ApprovalManager {
       expiresAt: now + this.approvalTimeoutMs,
     }
     const notification = this.notice(
-        `approval:${approval.requestID}`,
+        approvalNotificationID(approval.requestID),
         "approval",
         "approval",
         [
@@ -339,6 +342,31 @@ export class ApprovalManager {
     } catch {
       return null
     }
+  }
+
+  private activeApprovals(pending: PendingApproval[]): PendingApproval[] {
+    // 过期权威记录只从本地索引移除，不在启动阶段自动回复。
+    return pending.filter((item) => item.expiresAt > this.now())
+  }
+
+  private removedActiveApprovals(
+    before: PendingApproval[],
+    current: PendingApproval[],
+  ): PendingApproval[] {
+    // 只有仍在有效期内且被 OpenCode 移除的请求需要更新通知。
+    return before.filter(
+      (item) => item.expiresAt > this.now() && !current.some((value) => value.requestID === item.requestID),
+    )
+  }
+
+  private reconciledNotice(removed: PendingApproval[]): NotificationEnvelope {
+    // 对账只报告仍有效但已由 OpenCode 处理的请求。
+    return this.notice(
+      `approval-reconciled:${removed.map((item) => item.requestID).join(",")}`,
+      "approval-result",
+      "warning",
+      `[Approval updated]\n${removed.length} 个请求已在 OpenCode 中处理或失效。`,
+    )
   }
 
   private syncUnavailableNotice(): NotificationEnvelope {

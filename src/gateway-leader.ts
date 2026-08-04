@@ -25,6 +25,7 @@ interface GatewayLeaderOptions {
   mailbox: SharedMailbox
   lease: LeaseLike
   ownerInstanceID: string
+  prepareStartup?: () => Promise<void>
   supervisor?: Pick<TransportHealthSupervisor, "start" | "stop">
   shouldNotifyStop?: () => boolean
   timers?: Partial<LeaderTimers>
@@ -164,8 +165,9 @@ export class GatewayLeader {
   }
 
   private async activate(transition: number): Promise<boolean> {
-    // recorder 必须在 supervisor 启动长轮询前配置。
+    // 权威审批准备完成后才允许启动 transport 和恢复历史 outbox。
     this.configureRecorder()
+    await this.options.prepareStartup?.()
     this.running = true
     const handler = (message: InboundApprovalMessage) => this.handleCurrentMessage(message)
     if (this.options.supervisor) {

@@ -276,6 +276,33 @@ test("keeps local approvals when authoritative reconciliation fails", async () =
   assert.match(notices[0].text, /Approval sync unavailable/)
 })
 
+test("startup keeps only fresh current approval notifications", async () => {
+  const fresh = request("fresh", 1)
+  const expired = { ...request("expired", 2), expiresAt: 50 }
+  const { manager, store, api, replies } = harness([expired])
+  api.pending = [fresh, expired]
+  store.enqueueNotification({ id: "done:old", kind: "done", text: "done", createdAt: 1 })
+  store.enqueueNotification({ id: "error:old", kind: "error", text: "error", createdAt: 2 })
+  store.enqueueNotification({ id: "approval:fresh", kind: "approval", text: "fresh", createdAt: 3 })
+  store.enqueueNotification({ id: "approval:expired", kind: "approval", text: "expired", createdAt: 4 })
+
+  await manager.prepareStartup()
+
+  assert.deepEqual(store.loadPendingApprovals().map((item) => item.requestID), ["fresh"])
+  assert.deepEqual(store.loadOutbox().map((item) => item.id), ["approval:fresh"])
+  assert.deepEqual(replies, [])
+})
+
+test("reconciliation silently removes expired authoritative approvals", async () => {
+  const expired = { ...request("expired", 1), expiresAt: 50 }
+  const { manager, store } = harness([expired])
+
+  const notices = await manager.reconcile()
+
+  assert.deepEqual(store.loadPendingApprovals(), [])
+  assert.deepEqual(notices, [])
+})
+
 test("ignores ordinary text when no approval is pending", async () => {
   const { manager, replies } = harness([])
 

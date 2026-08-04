@@ -1,3 +1,10 @@
+const APPROVAL_NOTIFICATION_PREFIX = "approval:"
+
+export function approvalNotificationID(requestID: string): string {
+  // 审批通知键集中生成，启动裁剪与实时入队使用同一命名规则。
+  return `${APPROVAL_NOTIFICATION_PREFIX}${requestID}`
+}
+
 export function formatError(error: unknown): string {
   const firstLine = (message: string) => message.split(/\r?\n/, 1)[0]
 

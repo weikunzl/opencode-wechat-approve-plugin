@@ -7,6 +7,10 @@
 受保护、会过期的本地 `file://` 二维码页面，并通过 OpenCode Toast 提供链接。
 用户扫码并发送“绑定”后，插件无需重启即可真实探测 transport 并重放 outbox。
 
+Gateway Leader 启动时先读取 OpenCode 权威审批快照，再恢复 outbox。历史完成、错误、
+审批结果和警告不会在重绑后重新发送；过期审批只清理本地索引，不调用权限回复接口。
+权威快照失败时本轮 Leader 不启动 transport，由现有租约机制重试，避免脏消息抢先发送。
+
 新增 `wechat-approve rebind-link` 用于再次查看当前有效链接。现有 `bind`、
 `setup` 和 `install` 保持兼容。不新增 HTTP 端口、后台守护进程或浏览器自动打开。
 
@@ -24,6 +28,7 @@
 - QR 发布顺序、登录和绑定取消、旧绑定原子保留。
 - context 宽限、`-14` 立即升级、重复失败去重和绑定变化取消。
 - 新绑定完成后允许真实探测，探测成功前不报告恢复。
+- 启动权威快照先于 transport，且只恢复当前未过期审批对应的 outbox 通知。
 - OpenCode Toast、`rebind-link`、doctor 和敏感信息脱敏。
 - 完整 `npm test`、coverage、自动化 E2E、build、pack 和 diff check。
 

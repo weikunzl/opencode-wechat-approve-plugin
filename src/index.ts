@@ -378,16 +378,6 @@ export const WeChatPlugin: Plugin = async (input) => {
     pages: new RebindPageStore({ directory: store.getDirectory() }),
     notify: createRebindNotifier(input.client, input.directory),
   })
-  const supervisor = new TransportHealthSupervisor({ store, gateway, rebind })
-  const leader = new GatewayLeader({
-    gateway,
-    mailbox,
-    lease,
-    ownerInstanceID: instance.instanceID,
-    supervisor,
-    shouldNotifyStop: () =>
-      instances.prune().every((item) => item.instanceID === instance.instanceID),
-  })
   const approvalModel = config.model
     ? new OpenCodeApprovalModel({
         client: input.client,
@@ -422,6 +412,17 @@ export const WeChatPlugin: Plugin = async (input) => {
     Date.now,
     (sessionID) => internalSessions.has(sessionID),
   )
+  const supervisor = new TransportHealthSupervisor({ store, gateway, rebind })
+  const leader = new GatewayLeader({
+    gateway,
+    mailbox,
+    lease,
+    ownerInstanceID: instance.instanceID,
+    prepareStartup: () => approvalManager.prepareStartup(),
+    supervisor,
+    shouldNotifyStop: () =>
+      instances.prune().every((item) => item.instanceID === instance.instanceID),
+  })
   const runtime = createPluginRuntime({
     gateway,
     approvalManager,

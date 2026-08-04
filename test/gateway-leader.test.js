@@ -64,6 +64,27 @@ test("only the lease holder starts polling and persists inbound events first", a
   await first.stop()
 })
 
+test("prepares authoritative approval state before starting the supervisor", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "wechat-gateway-leader-prepare-"))
+  const order = []
+  const leader = new GatewayLeader({
+    gateway: gatewayHarness().gateway,
+    mailbox: new SharedMailbox(directory),
+    lease: { acquire: () => true, release: () => {} },
+    ownerInstanceID: "owner",
+    prepareStartup: async () => order.push("prepare"),
+    supervisor: {
+      start: async () => order.push("supervisor"),
+      stop: async () => {},
+    },
+  })
+
+  await leader.start(async () => {})
+
+  assert.deepEqual(order, ["prepare", "supervisor"])
+  await leader.stop()
+})
+
 test("does not dispatch a late callback after leader stop", async () => {
   const directory = mkdtempSync(join(tmpdir(), "wechat-gateway-leader-stop-"))
   const harness = gatewayHarness()

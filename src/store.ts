@@ -13,6 +13,7 @@ import {
   isRebindState,
   type RebindState,
 } from "./rebind-state.js"
+import { approvalNotificationID } from "./notification-utils.js"
 import type { AccountData } from "./types.js"
 
 export const WECHAT_DATA_DIR_NAME = "wechat-approve"
@@ -182,6 +183,15 @@ export class WeChatStore {
       "notification-outbox.json",
       this.loadOutbox().filter((item) => item.id !== id),
     )
+  }
+
+  retainCurrentApprovalNotifications(pending: PendingApproval[]): void {
+    // 启动只恢复当前审批提示，历史生命周期和审批结果不再重放。
+    const currentIDs = new Set(pending.map((item) => approvalNotificationID(item.requestID)))
+    const retained = this.loadOutbox().filter(
+      (item) => item.kind === "approval" && currentIDs.has(item.id),
+    )
+    this.atomicWrite("notification-outbox.json", retained)
   }
 
   loadTransportHealth(): TransportHealthState {
